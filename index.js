@@ -200,7 +200,7 @@ Socket.prototype._sendData = function() {
 		} else 
 			nextData = this.unsend.splice(0, 1)
 
-		let header = this.makeHeader(ST_DATA, seq)
+		let header = this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum())
 		this.timeOutQueue.insert(header.timestamp_microseconds, seq)
 		this._send(header, nextData)		
 	}
