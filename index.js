@@ -388,7 +388,7 @@ function getHeaderBuf(buf) {
 }
 
 function getBufHeader(header) {
-	//console.log(header)
+	console.log(header)
 	let buf = Buffer.alloc(20)
 	buf.writeUInt8(header.type << 4 | header.ver, 0)
 	buf.writeUInt8(header.extension, 1)
