@@ -264,7 +264,7 @@ Socket.prototype._recv = function(msg) { //called by listener, handle ack in all
 	header = getHeaderBuf(msg)
 	clearTimeout(this.timer)
 	this.timeOutMult = 1;
-	this.reply_micro = Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,31)
+	this.reply_micro = Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32)
 	
 
 	if(header.type == ST_SYN) { //handle spurious syn and first syn
@@ -407,7 +407,7 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 		'ver' : VERSION,
 		'connection_id' : type == ST_SYN ? this.recvConnectID : this.sendConnectID,
 		'timestamp_microseconds' : this.timeStamp(),  
-		'timestamp_difference_microseconds' : this.reply_micro % Math.pow(2,31),
+		'timestamp_difference_microseconds' : this.reply_micro % Math.pow(2,32),
 		'wnd_size' : DEFAULT_WINDOW_SIZE,
 		'seq_nr' : seq_nr ? seq_nr : this.seq_nr,
 		'ack_nr' : ack_nr ? ack_nr : this.ack_nr,
