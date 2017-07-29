@@ -416,7 +416,7 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 
 var timeStampF = function () { //microsecond timestamp
 	let now = process.hrtime()
-	return (now[0] * 1e6 + Math.floor(now[1]/1e3)) % Math.pow(2,32)
+	return (now[0] * 1e6 % 3600 + Math.floor(now[1]/1e3)) % Math.pow(2,32)
 }
 
 uTP = {
