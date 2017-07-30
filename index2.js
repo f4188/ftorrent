@@ -375,10 +375,10 @@ Socket.prototype._recv = function(msg) { //called by listener, handle ack in all
  
  Socket.prototype._recvData = function(header, data) {
 	this.recvSeqs.push(header)
-	if(header.seq_nr == this.recvWindow.ackNum()) {
-		//console.log("Acking duplicate",  this.recvWindow.ackNum(), "on reciept of", header.seq_nr)
-		return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum())
-	} else if (header.seq_nr < this.recvWindow.ackNum()) {
+	if(header.seq_nr <= this.recvWindow.ackNum()) {
+		//console.log("Acking r",  this.recvWindow.ackNum(), "on reciept of", header.seq_nr)
+		//return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum())
+	
 		return
 	}
 
