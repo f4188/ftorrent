@@ -261,7 +261,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	else 
 		this.dupAck++;
 
-	if(this.dupAck == 3) {
+	if(this.dupAck == 15) {
 		console.log("DUPACK")
 		this.dupAck = 0;
 		let size = this.sendWindow.maxWindowBytes
@@ -474,8 +474,9 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 }
 
 var timeStampF = function () { //microsecond timestamp
-	let now = process.hrtime()
-	return (now[0] * 1e6 % 3600000000 + Math.floor(now[1]/1e3)) % Math.pow(2,32)
+	//let now = process.hrtime()
+	//return (now[0] * 1e6 % 3600000000 + Math.floor(now[1]/1e3)) % Math.pow(2,32)
+	return (Date.now() % 60000) * 1e3
 }
 
 uTP = {
