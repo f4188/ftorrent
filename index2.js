@@ -39,7 +39,7 @@ const INITIAL_TIMEOUT = 5000
 const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT = 8 * PACKET_SIZE
-const DEFAULT_WINDOW_SIZE = 10 * 1500
+const DEFAULT_WINDOW_SIZE = 1500
 const DEFAULT_RECV_WINDOW_SIZE = 30 * 1500
 const KEEP_ALIVE_INTERVAL = 60000
 
@@ -194,7 +194,7 @@ Socket.prototype._sendSyn = function() { //called by connect
 	*/
 	this.sendBuffer = new WindowBuffer(seq_nr, DEFAULT_WINDOW_SIZE, -1, this.packet_size)
 	let header = this.makeHeader(ST_SYN, seq_nr, null)
-	this.timeOutQueue.insert(header.timestamp_microseconds, seq_nr)
+	this.timeOutQueue.insert(header.timestamp_microseconds / 1e3, seq_nr)
 	this._send(header);
 } 
 
@@ -230,7 +230,7 @@ Socket.prototype._sendData = function() {
 			
 			let next = this.sendBuffer.getNext()
 			let header = this.makeHeader(ST_DATA, next.seq, this.recvWindow.ackNum())
-			this.timeOutQueue.insert(header.timestamp_microseconds, next.seq)
+			this.timeOutQueue.insert(header.timestamp_microseconds / 1e3, next.seq)
 			//console.log("send", next.seq)
 			this._send(header, next.elem)
 		}
@@ -262,7 +262,9 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
-		console.log("DUPACK")
+		//console.log("DUPACK")
+		console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
+		//console.log("Seqs:", this.)
 		this.dupAck = 0;
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < PACKET_SIZE) size = PACKET_SIZE
@@ -289,16 +291,20 @@ Socket.prototype._changeWindowSizes = function(header) {
 	this.win_reply_micro.removeByElem(time/1e3 - 2*60*1e3)
 	if(this.win_reply_micro.isEmpty())return
 	
-	let base_delay = this.win_reply_micro.peekMinTime().time 	
-	let off_target =  CCONTROL_TARGET - base_delay ;
+	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
+	let CCONTROL_TARGET = 500000
+	console.log("base delay", base_delay/2)
+	let off_target =  CCONTROL_TARGET - (base_delay/2) ;
 	let delay_factor = off_target / CCONTROL_TARGET;
 	let window_factor = this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes;
 	let scaled_gain = MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * window_factor;
 
-	//console.log(scaled_gain)
-	//this.sendBuffer.maxWindowBytes += scaled_gain
-	if(this.sendBuffer.maxWindowBytes < this.packet_size) this.sendBuffer.maxWindowBytes = this.packet_size
+	console.log("scaled gain", scaled_gain)
+	this.sendBuffer.maxWindowBytes += scaled_gain
 
+	
+	if(this.sendBuffer.maxWindowBytes < this.packet_size) this.sendBuffer.maxWindowBytes = this.packet_size
+	console.log("maxWindowBytes", this.sendBuffer.maxWindowBytes)
 }
 
 Socket.prototype._recv = function(msg) { //called by listener, handle ack in all cases
@@ -309,7 +315,6 @@ Socket.prototype._recv = function(msg) { //called by listener, handle ack in all
 	this.timeOutMult = 1;
 	this.reply_micro = Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32)
 	
-
 	if(header.type == ST_SYN) { //handle spurious syn and first syn
 		if(!this.connected)
 			this._recvSyn(header)
@@ -338,29 +343,30 @@ Socket.prototype._recv = function(msg) { //called by listener, handle ack in all
 	
 	this.timeOutQueue.removeUptoElem(header.seq_nr)
 
+	this._calcNewTimeout(header)
 	this._changeWindowSizes(header)
 
 	if(!this.eof_pkt) 
 		this._sendData()
 
-	/*
+	
 	if(!this.sendBuffer.isEmpty()) {
 		//console.log(this.sendBuffer)
 		//console.log(this.timeOutQueue)
-		assert(!this.timeOutQueue.isEmpty(), "timeout queue should not be empty if numPacks > 0")
-		let elap = (this.timeStamp() - this.timeOutQueue.peekMinTime().time)/1e3
+		//assert(!this.timeOutQueue.isEmpty(), "timeout queue should not be empty if numPacks > 0")
+		let elap = (this.timeStamp()/1e3 - this.timeOutQueue.peekMinTime().time)
 		
 		this.timer = setTimeout(()=> {
 			console.log("TIMEOUT")		
 			this.timeOutQueue.empty()
-			this.packet_size = 150
-			this.sendBuffer.packetSize = this.packet_size
-			this.max_window = this.packet_size
+			//this.packet_size = 150
+			//this.sendBuffer.packetSize = this.packet_size
+			//this.max_window = this.packet_size
+			this.sendBuffer.changeWindowSize(PACKET_SIZE)
 			this.timeOutMult = 2;
-			this._resendData()
-
-		}, this.timeOutMult * (this.default_timeout - elap )) //
-	}*/
+			this._sendData()
+		}, this.timeOutMult * (this.default_timeout - elap)) //
+	}
 	
 	if(header.type == ST_STATE) return; //nothing more to do	
 	if(header.type == ST_DATA)
@@ -468,7 +474,7 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 var timeStampF = function () { //microsecond timestamp
 	//let now = process.hrtime()
 	//return (now[0] * 1e6 % 3600000000 + Math.floor(now[1]/1e3)) % Math.pow(2,32)
-	return (Date.now() % 60000) * 1e3
+	return (Date.now() ) * 1e3
 }
 
 uTP = {
