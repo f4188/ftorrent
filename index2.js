@@ -293,18 +293,18 @@ Socket.prototype._changeWindowSizes = function(header) {
 	
 	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
 	let CCONTROL_TARGET = 500000
-	console.log("base delay", base_delay/2)
+	//console.log("base delay", base_delay/2)
 	let off_target =  CCONTROL_TARGET - (base_delay/2) ;
 	let delay_factor = off_target / CCONTROL_TARGET;
 	let window_factor = this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes;
 	let scaled_gain = MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * window_factor;
 
-	console.log("scaled gain", scaled_gain)
+	//console.log("scaled gain", scaled_gain)
 	this.sendBuffer.maxWindowBytes += scaled_gain
 
 	
 	if(this.sendBuffer.maxWindowBytes < this.packet_size) this.sendBuffer.maxWindowBytes = this.packet_size
-	console.log("maxWindowBytes", this.sendBuffer.maxWindowBytes)
+	//console.log("maxWindowBytes", this.sendBuffer.maxWindowBytes)
 }
 
 Socket.prototype._recv = function(msg) { //called by listener, handle ack in all cases
@@ -474,7 +474,7 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 var timeStampF = function () { //microsecond timestamp
 	//let now = process.hrtime()
 	//return (now[0] * 1e6 % 3600000000 + Math.floor(now[1]/1e3)) % Math.pow(2,32)
-	return (Date.now() ) * 1e3
+	return (Date.now() * 1e3 )  % Math.pow(2,32) 
 }
 
 uTP = {
