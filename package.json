@@ -13,8 +13,11 @@
   "license": "ISC",
   "dependencies": {
     "chai": "^4.1.0",
+    "forever": "^0.15.3",
     "get-port": "^3.1.0",
     "getport": "^0.1.0",
+    "gulp-exec": "^2.1.3",
+    "gulp-shell": "^0.6.3",
     "mocha": "^3.4.2",
     "q": "^1.5.0",
     "speedometer": "^1.0.0"
