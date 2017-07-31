@@ -199,7 +199,7 @@ Socket.prototype._sendData = function() {
 			let next = this.sendBuffer.getNext()
 			let time = this.timeStamp()
 			func = (function() {
-				this.sendBuffer.changeWindowSize(this.packet_size); //console.log("Timeout:", next.seq, "| Time:", time/1e3)
+				this.sendBuffer.changeWindowSize(this.packet_size); console.log("Timeout:", next.seq, "| Time:", time/1e3)
 				this._sendData()
 				//console.log("Time now:", this.timeStamp())
 			}).bind(this)
@@ -216,12 +216,23 @@ Socket.prototype._sendData = function() {
 }
 
 Socket.prototype._sendState = function(seq_nr, ack_nr) { 
+	/*
 	this.delayedAcks.push(ack_nr)
 	this.delayedAcks.sort()
-	if(this.delayedAcks.length > 5 || this.connecting)
-		this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), this.delayedAcks[this.delayedAcks.length - 1]))
-	this.delayedAcks = []
-	//this._send(this.makeHeader(ST_STATE, seq_nr, ack_nr ))
+
+	if(this.delayedAcks.length > 2 || this.connecting) {
+		this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), this.delayedAcks.pop()))
+		
+		this.delayedAcks = []
+	} else {
+
+	setTimeout((function(){
+			if(this.delayedAcks)
+				this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), this.delayedAcks.pop()))
+			this.delayedAcks = []
+		}).bind(this), 100)
+	}	*/
+	this._send(this.makeHeader(ST_STATE, seq_nr, ack_nr ))
 }
 
 Socket.prototype._send = function(header, data) {
@@ -273,7 +284,7 @@ Socket.prototype._changeWindowSizes = function(header) {
 	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
 	let CCONTROL_TARGET = 300000
 	let off_target =  CCONTROL_TARGET - (base_delay);
-	console.log("base delay", base_delay)
+	//console.log("base delay", base_delay)
 	let delay_factor = off_target / CCONTROL_TARGET;
 	let window_factor = this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes;
 	let scaled_gain = MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * window_factor;
