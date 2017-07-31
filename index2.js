@@ -19,7 +19,7 @@ const ST_SYN  = 4
 
 const VERSION = 1
 
-const INITIAL_TIMEOUT = 5000
+const INITIAL_TIMEOUT = 300000
 const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT = 8 * PACKET_SIZE
@@ -65,7 +65,7 @@ Server.prototype.listen = function(port, connectListener) {
 		process.stdout.write("Downloading")
 		this.conSockets[id].on('data', (data) => {
 			this.conSockets[id].total += data.length;  
-			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 , "bps" );
+			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 / 1000, "Kbps" );
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
@@ -118,7 +118,8 @@ function Socket(udpSock, port, host) {
 	this.recvConnectID; 
 	
 	//this.timeOutQueue = new TQueue() 
-	this.timeStamp = timeStampF
+	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) }
+
 	this.win_reply_micro = new TQueue()
 
 	this.seqs = []
@@ -180,7 +181,7 @@ Socket.prototype._recvSyn = function(header) {
 }
 
 Socket.prototype._sendFin = function() {
-	this.disconnecting = true;
+	this.disconnecting = true
 	this._send(this.makeHeader(ST_FIN))
 }
 
@@ -198,47 +199,29 @@ Socket.prototype._sendData = function() {
 		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext()
 			let time = this.timeStamp()
-			func = (function() {
-				this.sendBuffer.changeWindowSize(this.packet_size); console.log("Timeout:", next.seq, "| Time:", time/1e3)
+			next.timeStamp = time
+			next.timer = setTimeout((function() {
+				console.log("current seq num", this.sendBuffer.ackNum())
+				this.sendBuffer.changeWindowSize(this.packet_size); console.log("Timeout:", next.seq, "| Time:", time/1e3, "| default_timeout:",this.default_timeout)
 				this._sendData()
-				//console.log("Time now:", this.timeStamp())
-			}).bind(this)
-
-			next.timer = setTimeout(func, this.default_timeout / 1000)
+			}).bind(this) , this.default_timeout  / 1000)
 
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this._send(header, next.elem)
 		}
-	
 	}
 
 	if(this.dataBuffer.length < this.packet_size ) this.emit('databuffer:length<packet_size')
 }
 
 Socket.prototype._sendState = function(seq_nr, ack_nr) { 
-	/*
-	this.delayedAcks.push(ack_nr)
-	this.delayedAcks.sort()
-
-	if(this.delayedAcks.length > 2 || this.connecting) {
-		this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), this.delayedAcks.pop()))
-		
-		this.delayedAcks = []
-	} else {
-
-	setTimeout((function(){
-			if(this.delayedAcks)
-				this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), this.delayedAcks.pop()))
-			this.delayedAcks = []
-		}).bind(this), 100)
-	}	*/
 	this._send(this.makeHeader(ST_STATE, seq_nr, ack_nr ))
 }
 
 Socket.prototype._send = function(header, data) {
 	if(header.type == ST_DATA) this.seqs.push(header.seq_nr) 
 	let bufHeader = getBufHeader(header)
-	let packet = data != undefined ? Buffer.concat([bufHeader, data]): bufHeader
+	let packet = data != undefined ? Buffer.concat([bufHeader, data]) : bufHeader
 	this.udpSock.send(packet, this.port, this.host)
 } 
 
@@ -251,7 +234,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
-		console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
+		//console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
 		this.dupAck = 0;
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < PACKET_SIZE) size = PACKET_SIZE
@@ -263,14 +246,16 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	}
 }
 
-Socket.prototype._calcNewTimeout = function(header) {
+Socket.prototype._calcNewTimeout = function(timeStamps) {
+
 	if(this.dupAck != 0) return 
-	let packet_rtt = Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds);
-	let delta = this.rtt - packet_rtt
-	this.rtt_var += (Math.abs(delta) - this.rtt_var)/4
-	this.rtt += (packet_rtt - this.rtt) / 8
-	this.default_timeout = Math.max(Math.abs(this.rtt + this.rtt_var * 4), 500000)
-	//console.log("default_timeout", this.default_timeout)
+	let time = this.timeStamp()
+	timeStamps.map((x)=>{ return time - x}).forEach((function(packet_rtt) {
+		let delta = this.rtt - packet_rtt
+		this.rtt_var += (Math.abs(delta) - this.rtt_var)/4
+		this.rtt += (packet_rtt - this.rtt) / 8
+		this.default_timeout = Math.max(this.rtt + this.rtt_var * 4, 500000)
+	}).bind(this))
 }
 
 Socket.prototype._changeWindowSizes = function(header) {
@@ -278,13 +263,14 @@ Socket.prototype._changeWindowSizes = function(header) {
 
 	let time = this.timeStamp()
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
-	this.win_reply_micro.removeByElem(time/1e3 - 2*1e3)
+	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)
 	if(this.win_reply_micro.isEmpty())return
 	
 	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
 	let CCONTROL_TARGET = 300000
-	let off_target =  CCONTROL_TARGET - (base_delay);
-	//console.log("base delay", base_delay)
+	let off_target =  CCONTROL_TARGET - (base_delay / 2) ;
+	console.log("base delay", base_delay, "mintime", this.win_reply_micro.queue[10].time, "timestamp diff:", header.timestamp_difference_microseconds, "default_timeout", this.default_timeout)
+
 	let delay_factor = off_target / CCONTROL_TARGET;
 	let window_factor = this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes;
 	let scaled_gain = MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * window_factor;
@@ -324,30 +310,12 @@ Socket.prototype._recv = function(msg) {
 	}
 
 	this._handleDupAck(header.ack_nr)
-	this.sendBuffer.removeUpto(header.ack_nr)
-	//this.timeOutQueue.removeUptoElem(header.ack_nr)
-
-	this._calcNewTimeout(header)
+	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
+	this._calcNewTimeout(timeStamps)
 	this._changeWindowSizes(header)
 
 	if(!this.eof_pkt) 
 		this._sendData()
-
-	/*
-	if(!this.sendBuffer.isEmpty()) {
-		let elap = (this.timeStamp()/1e3 - this.timeOutQueue.peekMinTime().time)
-		let elem = this.timeOutQueue.peekMinTime.elem
-		this.timer = setTimeout(()=> {
-			console.log("TIMEOUT")		
-			this.timeOutQueue.empty()
-			//this.packet_size = 150
-			//this.sendBuffer.packetSize = this.packet_size
-			//this.max_window = this.packet_size
-			this.sendBuffer.changeWindowSize(PACKET_SIZE)
-			this.timeOutMult = 2;
-			this._sendData()
-		}, this.timeOutMult * (this.default_timeout - elap)) //
-	}*/
 	
 	if(header.type == ST_STATE) return; //nothing more to do	
 	if(header.type == ST_DATA)
@@ -376,25 +344,17 @@ Socket.prototype._recv = function(msg) {
  }
  
 Socket.prototype._close = function() { //fin exchanged
-	//this.emit('closed')
 	this.udpSock.close()
 }
  
 Socket.prototype.close = function() { //send fin, wait for fin reply
 	this._sendFin()
-	//this.emit('dump', 'fin')
 }
-/*
-Socket.prototype._final = function() {
-	this.emit('dump')
-	console.log("final")
-	
-}*/
 
 Socket.prototype._read = function() {}
 
 Socket.prototype._writeable = function() {
-	return this.connected & !this.eof_pkt;
+	return this.connected & !this.eof_pkt
 } 
 
 Socket.prototype._write = function(data, encoding, callback) { //node does buffering
@@ -421,7 +381,6 @@ function getHeaderBuf(buf) {
 }
 
 function getBufHeader(header) {
-	//console.log(header)
 	let buf = Buffer.alloc(20)
 	buf.writeUInt8(header.type << 4 | header.ver, 0)
 	buf.writeUInt8(header.extension, 1)
@@ -445,10 +404,6 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 		'seq_nr' : seq_nr ? seq_nr : this.seq_nr,
 		'ack_nr' : ack_nr ? ack_nr : this.ack_nr,
 	}
-}
-
-var timeStampF = function () { //microsecond timestamp
-	return (Date.now() * 1e3 )  % Math.pow(2,32) 
 }
 
 uTP = {
