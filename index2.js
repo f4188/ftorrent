@@ -8,7 +8,7 @@ TQueue = require('./lib/tqueue.js')
 speedometer = require('speedometer')
 PacketBuffer = require('./lib/PacketBuffer.js')
 WindowBuffer = require('./lib/sendBuffer.js')
-speed = speedometer(1)
+speed = speedometer(100)
 Q = require('q')
 
 const ST_DATA = 0  //Data
@@ -22,7 +22,7 @@ const VERSION = 1
 const INITIAL_TIMEOUT = 500000
 const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
-const MAX_CWND_INCREASE_PACKETS_PER_RTT = 8 * PACKET_SIZE
+const MAX_CWND_INCREASE_PACKETS_PER_RTT = PACKET_SIZE
 const DEFAULT_WINDOW_SIZE = 1500 * 8
 const DEFAULT_RECV_WINDOW_SIZE = 100 * 1500
 const KEEP_ALIVE_INTERVAL = 60000
@@ -254,7 +254,7 @@ Socket.prototype._calcNewTimeout = function(timeStamps) {
 		let delta = this.rtt - packet_rtt
 		this.rtt_var += (Math.abs(delta) - this.rtt_var)/4
 		this.rtt += (packet_rtt - this.rtt) / 8
-		this.default_timeout = Math.max(this.rtt + this.rtt_var * 4, 500000)
+		this.default_timeout = Math.max(this.rtt + this.rtt_var * 4, 3000000)
 	}).bind(this))
 }
 
