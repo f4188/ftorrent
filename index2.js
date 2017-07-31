@@ -219,7 +219,8 @@ Socket.prototype._sendState = function(seq_nr, ack_nr) {
 	this.delayedAcks.push(ack_nr)
 	this.delayedAcks.sort()
 	if(this.delayedAcks.length > 5 || this.connecting)
-		this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), ack_nr ))
+		this._send(this.makeHeader(ST_STATE, this.sendBuffer.seqNum(), this.delayedAcks[this.delayedAcks.length - 1]))
+	this.delayedAcks = []
 	//this._send(this.makeHeader(ST_STATE, seq_nr, ack_nr ))
 }
 
