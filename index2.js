@@ -22,8 +22,8 @@ const VERSION = 1
 const INITIAL_TIMEOUT = 5000
 const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
-const MAX_CWND_INCREASE_PACKETS_PER_RTT = PACKET_SIZE
-const DEFAULT_WINDOW_SIZE = 1500
+const MAX_CWND_INCREASE_PACKETS_PER_RTT = 8 * PACKET_SIZE
+const DEFAULT_WINDOW_SIZE = 1500 * 8
 const DEFAULT_RECV_WINDOW_SIZE = 100 * 1500
 const KEEP_ALIVE_INTERVAL = 60000
 
@@ -195,11 +195,12 @@ Socket.prototype._sendData = function() {
 
 		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext()
+			//next <= put in timer // next.timer = setTimeout(()=>{}, this.default_timeout)
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this.timeOutQueue.insert(header.timestamp_microseconds / 1e3, next.seq)
 			this._send(header, next.elem)
 		}
-		if(this.seqs.length > 1000) break
+		//if(this.seqs.length > 1000) break
 	
 	}
 
@@ -226,7 +227,6 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
-		//console.log("DUPACK")
 		console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
 		this.dupAck = 0;
 		let size = this.sendBuffer.maxWindowBytes / 2
@@ -268,7 +268,7 @@ Socket.prototype._changeWindowSizes = function(header) {
 	this.windowSizes.push(this.sendBuffer.maxWindowBytes)
 }
 
-Socket.prototype._recv = function(msg) { //called by listener, handle ack in all cases
+Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
 	if(header.type == ST_STATE) this.acks.push(header.ack_nr)
 	clearTimeout(this.timer)
