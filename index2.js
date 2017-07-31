@@ -65,7 +65,7 @@ Server.prototype.listen = function(port, connectListener) {
 		process.stdout.write("Downloading")
 		this.conSockets[id].on('data', (data) => {
 			this.conSockets[id].total += data.length;  
-			console.log("TOTAL:", this.conSockets[id].total, "|" ,"BYTES PER SECOND:", speed(data.length) );
+			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 , "bps" );
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
@@ -184,24 +184,23 @@ Socket.prototype._sendFin = function() {
 
 Socket.prototype._sendData = function() {
 
-	while(this.dataBuffer.length > this.packet_size || this.finished) {
+	while((!this.sendBuffer.isBufferFull() && (this.dataBuffer.length > this.packet_size || (!this.finished && this.dataBuffer.length)))
+		|| (this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())) {
 
-		while(!this.sendBuffer.isBufferFull()) {	
+		if(!this.sendBuffer.isBufferFull() && (this.dataBuffer.length > this.packet_size || (!this.finished && this.dataBuffer.length))) {	
 			let nextData = this.dataBuffer.slice(0,this.packet_size)
-			if(!nextData || nextData.length == 0) break 
 			this.dataBuffer = this.dataBuffer.slice(this.packet_size)
 			this.sendBuffer.insert(null, nextData)	
 		}
 
-		while(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
+		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext()
-			let header = this.makeHeader(ST_DATA, next.seq, this.recvWindow.ackNum())
+			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this.timeOutQueue.insert(header.timestamp_microseconds / 1e3, next.seq)
 			this._send(header, next.elem)
 		}
-
-		if(this.sendBuffer.isBufferFull() && (!this.sendBuffer.hasNext() || this.sendBuffer.isWindowFull())) break
-				
+		if(this.seqs.length > 1000) break
+	
 	}
 
 	if(this.dataBuffer.length < this.packet_size ) this.emit('databuffer:length<packet_size')
