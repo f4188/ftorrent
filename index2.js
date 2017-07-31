@@ -115,7 +115,7 @@ function Socket(udpSock, port, host) {
 	this.sendConnectID; 
 	this.recvConnectID; 
 	
-	this.timeOutQueue = new TQueue() 
+	//this.timeOutQueue = new TQueue() 
 	this.timeStamp = timeStampF
 	this.win_reply_micro = new TQueue()
 
@@ -195,9 +195,15 @@ Socket.prototype._sendData = function() {
 
 		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext()
-			//next <= put in timer // next.timer = setTimeout(()=>{}, this.default_timeout)
+			next.timer = setTimeout(function() {
+				this.sendBuffer.changeWindowSize(PACKET_SIZE)
+				//change packet size
+				
+				this._sendData()
+			}, this.default_timeout)
+
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
-			this.timeOutQueue.insert(header.timestamp_microseconds / 1e3, next.seq)
+			//this.timeOutQueue.insert(header.timestamp_microseconds / 1e3, next.seq)
 			this._send(header, next.elem)
 		}
 		//if(this.seqs.length > 1000) break
@@ -233,7 +239,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		if(size < PACKET_SIZE) size = PACKET_SIZE
 		let i = this.sendBuffer.changeWindowSize(size)
 		this.windowSizes.push(this.sendBuffer.maxWindowBytes)
-		this.timeOutQueue.removeAfterElem(i)
+		//this.timeOutQueue.removeAfterElem(i)
 		let seq = lastAck + 1
 		this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
 	}
@@ -271,7 +277,7 @@ Socket.prototype._changeWindowSizes = function(header) {
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
 	if(header.type == ST_STATE) this.acks.push(header.ack_nr)
-	clearTimeout(this.timer)
+	//clearTimeout(this.timer)
 	this.timeOutMult = 1;
 	this.reply_micro = Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32)
 	
@@ -284,7 +290,7 @@ Socket.prototype._recv = function(msg) {
 		this.connected = true;
 		if(header.type == ST_STATE) { //sender of syn only
 			console.log('Finish connection est')
-			this.timeOutQueue.removeByElem(this.seq_nr)
+			//this.timeOutQueue.removeByElem(this.seq_nr)
 			this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 			this.recvWindow = new WindowBuffer(header.seq_nr, -1, DEFAULT_RECV_WINDOW_SIZE, this.packet_size)	
 			this.emit('connected')
@@ -299,7 +305,7 @@ Socket.prototype._recv = function(msg) {
 
 	this._handleDupAck(header.ack_nr)
 	this.sendBuffer.removeUpto(header.ack_nr)
-	this.timeOutQueue.removeUptoElem(header.ack_nr)
+	//this.timeOutQueue.removeUptoElem(header.ack_nr)
 
 	this._calcNewTimeout(header)
 	this._changeWindowSizes(header)
@@ -307,7 +313,7 @@ Socket.prototype._recv = function(msg) {
 	if(!this.eof_pkt) 
 		this._sendData()
 
-	
+	/*
 	if(!this.sendBuffer.isEmpty()) {
 		let elap = (this.timeStamp()/1e3 - this.timeOutQueue.peekMinTime().time)
 		let elem = this.timeOutQueue.peekMinTime.elem
@@ -321,7 +327,7 @@ Socket.prototype._recv = function(msg) {
 			this.timeOutMult = 2;
 			this._sendData()
 		}, this.timeOutMult * (this.default_timeout - elap)) //
-	}
+	}*/
 	
 	if(header.type == ST_STATE) return; //nothing more to do	
 	if(header.type == ST_DATA)
