@@ -69,7 +69,7 @@ Server.prototype.listen = function(port, connectListener) {
 		process.stdout.write("Downloading")
 		this.conSockets[id].on('data', (data) => {
 			this.conSockets[id].total += data.length;  
-			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 / 1000, "Kbps" );
+			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 / 1000, "Kbps", "| Reply_micro:", this.conSockets[id].reply_micro );
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
