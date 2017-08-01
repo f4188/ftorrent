@@ -8,7 +8,7 @@ TQueue = require('./lib/tqueue.js')
 speedometer = require('speedometer')
 //PacketBuffer = require('./lib/PacketBuffer.js')
 WindowBuffer = require('./lib/sendBuffer.js')
-speed = speedometer(100)
+speed = speedometer(4)
 Q = require('q')
 winston = require('winston')
 
