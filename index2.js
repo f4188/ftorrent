@@ -10,6 +10,7 @@ PacketBuffer = require('./lib/PacketBuffer.js')
 WindowBuffer = require('./lib/sendBuffer.js')
 speed = speedometer(100)
 Q = require('q')
+winston = require('winston')
 
 const ST_DATA = 0  //Data
 const ST_FIN = 1
@@ -24,10 +25,11 @@ const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT = PACKET_SIZE
 const DEFAULT_WINDOW_SIZE = 1500 * 8
-const DEFAULT_RECV_WINDOW_SIZE = 100 * 1500
+const DEFAULT_RECV_WINDOW_SIZE = 6 * 1500
 const KEEP_ALIVE_INTERVAL = 60000
 
 function createServer() {
+	winston.add(winston.transports.File, { filename: './server.log' });
 	return new Server()
 }
 
@@ -41,6 +43,7 @@ function Server() {
 util.inherits(Server, EventEmitter)
 
 Server.prototype.listen = function(port, connectListener) { 
+	
 	this.udpSock = dgram.createSocket('udp4');
 	this.udpSock.bind(port);
 	
@@ -77,6 +80,7 @@ Server.prototype.close = function() {
 }
 
 function createSocket() {
+	winston.add(winston.transports.File, { filename: './socket.log' });
 	return new Socket(dgram.createSocket('udp4'))
 }
 
@@ -234,7 +238,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
-		//console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
+		console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
 		this.dupAck = 0;
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < PACKET_SIZE) size = PACKET_SIZE
@@ -309,6 +313,10 @@ Socket.prototype._recv = function(msg) {
 		this._close()
 		return;
 	}
+	//winston.info("Recieved packet.")
+	//winston.info("Seq num:", header.seq_nr, "| Ack num :", header.ack_nr)
+	//winston.info("time send:", header.timestamp_microseconds)
+	//winston.info("time now:", this.timeStamp())
 
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
