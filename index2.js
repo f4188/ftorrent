@@ -26,7 +26,7 @@ const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT =  PACKET_SIZE
 const DEFAULT_WINDOW_SIZE = 1500 * 2
-const DEFAULT_RECV_WINDOW_SIZE = 3 * 1500
+const DEFAULT_RECV_WINDOW_SIZE = 4 * 1500
 const KEEP_ALIVE_INTERVAL = 120000 //millis
 const MIN_DEFAULT_TIMEOUT = 500000 //micros
 
@@ -260,7 +260,7 @@ Socket.prototype._calcNewTimeout = function(timeStamps) {
 		let delta = this.rtt - packet_rtt
 		this.rtt_var += (Math.abs(delta) - this.rtt_var)/4
 		this.rtt += (packet_rtt - this.rtt) / 8
-		this.default_timeout = Math.max(this.rtt + this.rtt_var * 4, 500000)
+		this.default_timeout = Math.max(this.rtt + this.rtt_var * 4, 1000000)
 	}).bind(this))
 }
 
