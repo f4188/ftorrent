@@ -111,7 +111,7 @@ function Socket(udpSock, port, host) {
 
 	this.eof_pkt = null;
 	
-	this.reply_micro = 250*1000;
+	this.reply_micro = 250*1e3
 	this.default_timeout = MIN_DEFAULT_TIMEOUT
 	this.rtt = 500000;
 	this.rtt_var = 100000;
@@ -122,6 +122,7 @@ function Socket(udpSock, port, host) {
 	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) }
 
 	this.win_reply_micro = new TQueue()
+	this.timestamp_difference_microseconds = 250*1e3
 
 	this.on('finish', ()=>{this.finished = true})
 }
@@ -144,6 +145,14 @@ Socket.prototype.connect = function (port, host) {
 		if(getHeaderBuf(msg).connection_id == this.recvConnectID) 
 			this._recv(msg);
 	})	
+
+	//if(this.win_reply_micro.isEmpty())return
+	var sg = (function() {
+		this._scaledGain(); 
+		setTimeout(sg, this.rtt)
+	}).bind(this)
+	sg();
+
 	this.connecting = true;
 	this._sendSyn()
 }
@@ -248,16 +257,19 @@ Socket.prototype._calcNewTimeout = function(timeStamps) {
 	}).bind(this))
 }
 
-Socket.prototype._scaledGain = function(header) {
+Socket.prototype._updateWinReplyMicro = function(header) {
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 
 	let time = this.timeStamp()
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
 	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)
-	if(this.win_reply_micro.isEmpty())return
+	//if(this.win_reply_micro.isEmpty())return
 	
+}
+
+Socket.prototype._scaledGain = function() {
 	////////////// only every rtt
-	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
+	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - this.timestamp_difference_microseconds)
 	this.base_delay = base_delay
 	let off_target =  CCONTROL_TARGET - (base_delay) ;
 
@@ -273,6 +285,7 @@ Socket.prototype._scaledGain = function(header) {
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
+	this.timestamp_difference_microseconds = header.timestamp_difference_microseconds
 	this.timeOutMult = 1;
 	this.reply_micro = Math.abs(Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
 	
@@ -300,7 +313,7 @@ Socket.prototype._recv = function(msg) {
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 	this._calcNewTimeout(timeStamps)
-	this._scaledGain(header)
+	this._updateWinReplyMicro(header)
 
 	if(!this.eof_pkt) 
 		this._sendData()
