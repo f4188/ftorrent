@@ -270,11 +270,9 @@ Socket.prototype._changeWindowSizes = function(header) {
 	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)
 	if(this.win_reply_micro.isEmpty())return
 	
-	//let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
-	let base_delay = Math.abs(this.reply_micro - header.timestamp_difference_microseconds)
-	let CCONTROL_TARGET = 300000
-	let off_target =  CCONTROL_TARGET - (base_delay / 2) ;
-	//console.log("base delay", base_delay, "mintime", this.win_reply_micro.queue[10].time, "timestamp diff:", header.timestamp_difference_microseconds, "default_timeout", this.default_timeout)
+	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
+	let CCONTROL_TARGET = 100000
+	let off_target =  CCONTROL_TARGET - (base_delay) ;
 
 	let delay_factor = off_target / CCONTROL_TARGET;
 	let window_factor = this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes;
