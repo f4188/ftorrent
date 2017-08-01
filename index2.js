@@ -25,7 +25,7 @@ const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT =  PACKET_SIZE
 const DEFAULT_WINDOW_SIZE = 1500 * 8
-const DEFAULT_RECV_WINDOW_SIZE = 30 * 1500
+const DEFAULT_RECV_WINDOW_SIZE = 15 * 1500
 const KEEP_ALIVE_INTERVAL = 60000
 const MIN_DEFAULT_TIMEOUT = 500000
 
@@ -263,7 +263,7 @@ Socket.prototype._calcNewTimeout = function(timeStamps) {
 	}).bind(this))
 }
 
-Socket.prototype._changeWindowSizes = function(header) {
+Socket.prototype._scaledGain = function(header) {
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 
 	let time = this.timeStamp()
@@ -320,7 +320,7 @@ Socket.prototype._recv = function(msg) {
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 	this._calcNewTimeout(timeStamps)
-	this._changeWindowSizes(header)
+	this._scaledGain(header)
 
 	if(!this.eof_pkt) 
 		this._sendData()
