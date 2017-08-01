@@ -11,6 +11,7 @@ WindowBuffer = require('./lib/sendBuffer.js')
 speed = speedometer(4)
 Q = require('q')
 winston = require('winston')
+var logger = new winston.Logger()
 
 const ST_DATA = 0  //Data
 const ST_FIN = 1
@@ -30,7 +31,7 @@ const KEEP_ALIVE_INTERVAL = 120000 //millis
 const MIN_DEFAULT_TIMEOUT = 500000 //micros
 
 function createServer() {
-	winston.add(winston.transports.File, { filename: './server.log' });
+	logger.add(winston.transports.File, { filename: './server.log' });
 	return new Server()
 }
 
@@ -81,7 +82,7 @@ Server.prototype.close = function() {
 }
 
 function createSocket() {
-	winston.add(winston.transports.File, { filename: './socket.log' });
+	logger.add(winston.transports.File, { filename: './socket.log' });
 	return new Socket(dgram.createSocket('udp4'))
 }
 
@@ -335,6 +336,8 @@ Socket.prototype._recv = function(msg) {
  
  Socket.prototype._recvData = function(header, data) {
 	//this.recvSeqs.push(header)
+	logger.info(header.timestamp_microseconds, header.seq_nr)
+
 	if(header.seq_nr <= this.recvWindow.ackNum()) return
 	
 	this.recvWindow.insert(header.seq_nr, data)
