@@ -299,12 +299,14 @@ Socket.prototype._recv = function(msg) {
 		this.connecting = false;
 		this.connected = true;
 		if(header.type == ST_STATE) { //sender of syn only
-			console.log('Finish connection est')
+			console.log('Connection established')
 			//this.timeOutQueue.removeByElem(this.seq_nr)
 			this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 			this.recvWindow = new WindowBuffer(header.seq_nr, -1, DEFAULT_RECV_WINDOW_SIZE, this.packet_size)	
 			this.emit('connected')
-		} 
+		} else {
+			console.log("Connection established")
+		}
 	} else if (header.type == ST_FIN) {
 		this.disconnecting = true
 		this.eof_pkt = header.seq_nr;
