@@ -6,7 +6,7 @@ util = require('util')
 EventEmitter = require('events').EventEmitter
 TQueue = require('./lib/tqueue.js')
 speedometer = require('speedometer')
-PacketBuffer = require('./lib/PacketBuffer.js')
+//PacketBuffer = require('./lib/PacketBuffer.js')
 WindowBuffer = require('./lib/sendBuffer.js')
 speed = speedometer(100)
 Q = require('q')
@@ -25,8 +25,9 @@ const PACKET_SIZE = 1500
 const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT =  PACKET_SIZE
 const DEFAULT_WINDOW_SIZE = 1500 * 8
-const DEFAULT_RECV_WINDOW_SIZE = 6 * 1500
+const DEFAULT_RECV_WINDOW_SIZE = 30 * 1500
 const KEEP_ALIVE_INTERVAL = 60000
+const MIN_DEFAULT_TIMEOUT = 500000
 
 function createServer() {
 	winston.add(winston.transports.File, { filename: './server.log' });
@@ -102,7 +103,7 @@ function Socket(udpSock, port, host) {
 
 	this.connected = false;
 	this.connecting = false;
-	this.disconnecting = true;
+	this.disconnecting = false;
 	
 	this.delayedAcks = []
 
@@ -113,7 +114,7 @@ function Socket(udpSock, port, host) {
 	this.eof_pkt = null;
 	
 	this.reply_micro = 250*1000;
-	this.default_timeout =  INITIAL_TIMEOUT
+	this.default_timeout = MIN_DEFAULT_TIMEOUT
 	this.timeOutMult = 1
 	this.rtt = 500000;
 	this.rtt_var = 100000;
@@ -126,9 +127,9 @@ function Socket(udpSock, port, host) {
 
 	this.win_reply_micro = new TQueue()
 
-	this.seqs = []
-	this.acks = []
-	this.recvSeqs = []
+	//this.seqs = []
+	//this.acks = []
+	//this.recvSeqs = []
 
 	this.on('finish', ()=>{this.finished = true})
 }
@@ -223,7 +224,7 @@ Socket.prototype._sendState = function(seq_nr, ack_nr) {
 }
 
 Socket.prototype._send = function(header, data) {
-	if(header.type == ST_DATA) this.seqs.push(header.seq_nr) 
+	//if(header.type == ST_DATA) this.seqs.push(header.seq_nr) 
 	let bufHeader = getBufHeader(header)
 	let packet = data != undefined ? Buffer.concat([bufHeader, data]) : bufHeader
 	this.udpSock.send(packet, this.port, this.host)
@@ -285,7 +286,7 @@ Socket.prototype._changeWindowSizes = function(header) {
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
-	if(header.type == ST_STATE) this.acks.push(header.ack_nr)
+	//if(header.type == ST_STATE) this.acks.push(header.ack_nr)
 	//clearTimeout(this.timer)
 	this.timeOutMult = 1;
 	this.reply_micro = Math.abs(Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
@@ -330,7 +331,7 @@ Socket.prototype._recv = function(msg) {
 }
  
  Socket.prototype._recvData = function(header, data) {
-	this.recvSeqs.push(header)
+	//this.recvSeqs.push(header)
 	if(header.seq_nr <= this.recvWindow.ackNum()) return
 	
 	this.recvWindow.insert(header.seq_nr, data)
