@@ -147,11 +147,20 @@ Socket.prototype.connect = function (port, host) {
 	})	
 
 	//if(this.win_reply_micro.isEmpty())return
-	var sg = (function() {
-		this._scaledGain(); 
-		setTimeout(sg, this.rtt)
-	}).bind(this)
-	sg();
+	
+		
+//win_reply_micro.peekMinTime().time
+	var scaledGain = function(minTime, timestampDiff, curWindow, maxWindow, packet_size) {
+		let base_delay = Math.abs(minTime - timestampDiff)
+		let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
+		maxWindow +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * (curWindow / maxWindow)	
+		return (maxWindow < packet_size)? packet_size : maxWindow
+	}
+	
+	let self = this
+	setTimeout(function() {
+		self.sendBuffer.maxWindowBytes = scaledGain(self.timestamp_difference_microseconds, self.win_reply_micro.peekMinTime(), self.sendBuffer.curWindow(), self.sendBuffer.maxWindowBytes, self.packet_size)
+	}, self.rtt)
 
 	this.connecting = true;
 	this._sendSyn()
@@ -265,22 +274,6 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)
 	//if(this.win_reply_micro.isEmpty())return
 	
-}
-
-Socket.prototype._scaledGain = function() {
-	////////////// only every rtt
-	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - this.timestamp_difference_microseconds)
-	this.base_delay = base_delay
-	let off_target =  CCONTROL_TARGET - (base_delay) ;
-
-	let delay_factor = off_target / CCONTROL_TARGET;
-	let window_factor = this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes;
-	let scaled_gain = MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * window_factor;
-	this.sendBuffer.maxWindowBytes += scaled_gain
-
-	if(this.sendBuffer.maxWindowBytes < this.packet_size) this.sendBuffer.maxWindowBytes = this.packet_size
-	this.windowSizes.push(this.sendBuffer.maxWindowBytes)
-	//////////////
 }
 
 Socket.prototype._recv = function(msg) { 
