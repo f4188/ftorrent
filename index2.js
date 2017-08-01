@@ -69,7 +69,7 @@ Server.prototype.listen = function(port, connectListener) {
 		process.stdout.write("Downloading")
 		this.conSockets[id].on('data', (data) => {
 			this.conSockets[id].total += data.length;  
-			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 / 1000, "Kbps", "| Reply_micro:", this.conSockets[id].reply_micro );
+			console.log("Total:", this.conSockets[id].total, "bytes |" ,"Speed:", speed(data.length)*8 / 1000, "Kbps", "| Base delay:", this.conSockets[id].base_delay );
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
@@ -89,7 +89,7 @@ function Socket(udpSock, port, host) {
 	Duplex.call(this)	
 	this.port = port;
 	this.host = host;
-	
+	this.base_delay = 300
 	this.total = 0
 
 	this.dataBuffer = Buffer.alloc(0)
@@ -272,6 +272,7 @@ Socket.prototype._scaledGain = function(header) {
 	if(this.win_reply_micro.isEmpty())return
 	
 	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
+	this.base_delay = base_delay
 	let CCONTROL_TARGET = 300000
 	let off_target =  CCONTROL_TARGET - (base_delay) ;
 
