@@ -26,8 +26,8 @@ const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT =  PACKET_SIZE
 const DEFAULT_WINDOW_SIZE = 1500 * 2
 const DEFAULT_RECV_WINDOW_SIZE = 4 * 1500
-const KEEP_ALIVE_INTERVAL = 60000
-const MIN_DEFAULT_TIMEOUT = 500000
+const KEEP_ALIVE_INTERVAL = 120000 //millis
+const MIN_DEFAULT_TIMEOUT = 500000 //micros
 
 function createServer() {
 	winston.add(winston.transports.File, { filename: './server.log' });
@@ -272,7 +272,7 @@ Socket.prototype._scaledGain = function(header) {
 	if(this.win_reply_micro.isEmpty())return
 	
 	let base_delay = Math.abs(this.win_reply_micro.peekMinTime().time - header.timestamp_difference_microseconds)
-	let CCONTROL_TARGET = 100000
+	let CCONTROL_TARGET = 300000
 	let off_target =  CCONTROL_TARGET - (base_delay) ;
 
 	let delay_factor = off_target / CCONTROL_TARGET;
