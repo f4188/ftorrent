@@ -206,7 +206,7 @@ Socket.prototype._sendData = function() {
 			next.timer = setTimeout((function() {
 				//console.log("current seq num", this.sendBuffer.ackNum())
 				this.sendBuffer.changeWindowSize(this.packet_size); 
-				console.log("Timeout:", next.seq, "| Time:", time/1e3, "| default_timeout:",this.default_timeout)
+				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
 
@@ -237,7 +237,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
-		console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
+		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		this.dupAck = 0;
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
@@ -324,9 +324,9 @@ Socket.prototype._recv = function(msg) {
 	//assume send window is never larger then 100 packets. also since acknum > beginning of send window, worst case no ack has reached sender and send window
 	//is max send window behind recieve window. Special case if ackNum is within max send window of 0. Then nums close to 2^16 should also be rejected
 	//smallest packet size 150 bytes, max send/recv buffers around 200 kB ~ 1000 packets - rare condition
-	let pktzn = 1000
+	let pktzn = 300
 	if (header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr > this.recvWindow.ackNum() - pktzn && this.recvWindow.ackNum() >= pktzn 
-	|| this.recvWindow.ackNum() < pktzn && header.seq_nr > Math.pow(2,16) - pktzn) return
+	|| this.recvWindow.ackNum() < pktzn && header.seq_nr > Math.pow(2,16) - pktzn) return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
 	//if(header.seq_nr <= this.recvWindow.ackNum() && !((this.recvWindow.ackNum() > 100) && header.seq_nr < this.recvWindow.ackNum() - 100)) return 
 	
 	this.recvWindow.insert(header.seq_nr, data) //assumes seqnum > acknum
