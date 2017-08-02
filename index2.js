@@ -264,7 +264,6 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
-	if(this.sendBuffer) this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._updateWinReplyMicro(header)
 	
 	if(header.type == ST_SYN) { //handle spurious syn and first syn
@@ -299,6 +298,7 @@ Socket.prototype._recv = function(msg) {
 		return;
 	}
 
+	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 	this._calcNewTimeout(timeStamps)
