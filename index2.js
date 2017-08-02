@@ -1,35 +1,35 @@
 
-dgram = require('dgram')
+Dgram = require('dgram')
 Duplex = require('stream').Duplex
-crypto = require('crypto')
-util = require('util')
+Crypto = require('crypto')
+Util = require('util')
 EventEmitter = require('events').EventEmitter
+
 TQueue = require('./lib/tqueue.js')
-speedometer = require('speedometer')
 WindowBuffer = require('./lib/sendBuffer.js')
+
+speedometer = require('speedometer')
 speed = speedometer(4)
 speed2 = speedometer(60)
-Q = require('q')
 winston = require('winston')
 
 var logger = new winston.Logger()
 
-const ST_DATA = 0  //Data
+const VERSION = 1
+const ST_DATA = 0 //Data
 const ST_FIN = 1
 const ST_STATE = 2 //Ack
 const ST_RESET = 3  
 const ST_SYN  = 4
 
-const VERSION = 1
-
-const INITIAL_PACKET_SIZE = 1500
-const CCONTROL_TARGET = 100000
-const MAX_CWND_INCREASE_PACKETS_PER_RTT =  INITIAL_PACKET_SIZE
-const DEFAULT_WIN_UDP_BUFFER = 8000
-const DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
-const DEFAULT_RECV_WINDOW_SIZE = 5 * 1500
-const KEEP_ALIVE_INTERVAL = 120000 //millis
-const MIN_DEFAULT_TIMEOUT = 500000 //micros
+INITIAL_PACKET_SIZE = 1500
+CCONTROL_TARGET = 100000
+MAX_CWND_INCREASE_PACKETS_PER_RTT =  INITIAL_PACKET_SIZE
+DEFAULT_WIN_UDP_BUFFER = 8000
+DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
+DEFAULT_RECV_WINDOW_SIZE = 5 * 1500
+KEEP_ALIVE_INTERVAL = 120000 //millis
+MIN_DEFAULT_TIMEOUT = 500000 //micros
 
 function createServer() {
 	logger.add(winston.transports.File, { filename: './server.log' });
@@ -43,11 +43,11 @@ function Server() {
 	this.cheat;
 }
 
-util.inherits(Server, EventEmitter)
+Util.inherits(Server, EventEmitter)
 
 Server.prototype.listen = function(port, connectListener) { 
 	
-	this.udpSock = dgram.createSocket('udp4');
+	this.udpSock = Dgram.createSocket('udp4');
 	this.udpSock.bind(port);
 	
 	this.udpSock.on('message', (msg, rinfo) => {
@@ -65,7 +65,7 @@ Server.prototype.listen = function(port, connectListener) {
 		console.log("New connection | id:", id)
 		this.conSockets[id].on('data', (data) => {
 			this.conSockets[id].total += data.length; 
-			process.stdout.clearLine() 
+			//process.stdout.clearLine() 
 			process.stdout.cursorTo(0)
 			process.stdout.write("Total: " + ("          " + (this.conSockets[id].total / 1000)).slice(-10) + " KB | Download rate: " + (speed(data.length)*8 / 1000) + " Kbps | Reply micro: " + ("            " + this.conSockets[id].reply_micro).slice(8) + " | Dwn: " + speed2(data.length)*8/1000 );
 		})
@@ -80,7 +80,7 @@ Server.prototype.close = function() {
 
 function createSocket() {
 	logger.add(winston.transports.File, { filename: './socket.log' });
-	return new Socket(dgram.createSocket('udp4'))
+	return new Socket(Dgram.createSocket('udp4'))
 }
 
 function Socket(udpSock, port, host) {
@@ -128,7 +128,7 @@ function Socket(udpSock, port, host) {
 	this.on('finish', ()=>{this.finished = true})
 }
 
-util.inherits(Socket, Duplex)
+Util.inherits(Socket, Duplex)
 
 Socket.prototype.remoteAddress = function () { return {'port' : this.port, 'host' : this.host} }
 
@@ -155,8 +155,8 @@ Socket.prototype.connect = function (port, host) {
 }
 
 Socket.prototype._sendSyn = function() { //called by connect
-	let seq_nr = crypto.randomBytes(2).readUInt16BE();
-	this.recvConnectID = crypto.randomBytes(2).readUInt16BE();
+	let seq_nr = Crypto.randomBytes(2).readUInt16BE();
+	this.recvConnectID = Crypto.randomBytes(2).readUInt16BE();
 	this.sendConnectID = this.recvConnectID + 1;
 	/* function syn(i) {
 		this._send(header)
@@ -174,7 +174,7 @@ Socket.prototype._recvSyn = function(header) {
 	this.sendConnectID = header.connection_id;
 	this.recvConnectID = header.connection_id + 1;
 	this.recvWindow = new WindowBuffer(header.seq_nr, -1, DEFAULT_RECV_WINDOW_SIZE, this.packet_size)
-	let seq_nr = crypto.randomBytes(2).readUInt16BE()
+	let seq_nr = Crypto.randomBytes(2).readUInt16BE()
 	this.wnd_size = header.wnd_size;
 	this.connecting = true;
 	this.sendBuffer = new WindowBuffer(seq_nr, DEFAULT_INITIAL_WINDOW_SIZE, header.wnd_size, this.packet_size)
@@ -403,7 +403,6 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 		'connection_id' : type == ST_SYN ? this.recvConnectID : this.sendConnectID,
 		'timestamp_microseconds' : this.timeStamp(),  
 		'timestamp_difference_microseconds' : Math.abs(this.timestamp_difference_microseconds % Math.pow(2,32) ),
-		 //Math.abs(this.reply_micro % Math.pow(2,32)),
 		'wnd_size' : DEFAULT_RECV_WINDOW_SIZE,
 		'seq_nr' : seq_nr ? seq_nr : this.seq_nr,
 		'ack_nr' : ack_nr ? ack_nr : this.ack_nr,
