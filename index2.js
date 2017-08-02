@@ -8,6 +8,7 @@ TQueue = require('./lib/tqueue.js')
 speedometer = require('speedometer')
 WindowBuffer = require('./lib/sendBuffer.js')
 speed = speedometer(4)
+speed2 = speedometer(60)
 Q = require('q')
 winston = require('winston')
 
@@ -28,7 +29,7 @@ const DEFAULT_WIN_UDP_BUFFER = 8000
 const DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
 const DEFAULT_RECV_WINDOW_SIZE = 5 * 1500
 const KEEP_ALIVE_INTERVAL = 120000 //millis
-const MIN_DEFAULT_TIMEOUT = 800000 //micros
+const MIN_DEFAULT_TIMEOUT = 500000 //micros
 
 function createServer() {
 	logger.add(winston.transports.File, { filename: './server.log' });
@@ -66,8 +67,7 @@ Server.prototype.listen = function(port, connectListener) {
 			this.conSockets[id].total += data.length; 
 			process.stdout.clearLine() 
 			process.stdout.cursorTo(0)
-
-			process.stdout.write("Total: " + (this.conSockets[id].total / 1000) + " KB | Download rate: " + (speed(data.length)*8 / 1000) + " Kbps | Base delay: " + this.conSockets[id].base_delay );
+			process.stdout.write("Total: " + ("          " + (this.conSockets[id].total / 1000)).slice(-10) + " KB | Download rate: " + (speed(data.length)*8 / 1000) + " Kbps | Reply micro: " + ("            " + this.conSockets[id].reply_micro).slice(8) + " | Dwn: " + speed2(data.length) );
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
@@ -145,6 +145,9 @@ Socket.prototype.connect = function (port, host) {
 	this.udpSock.on('message', (msg, rinfo) => {
 		if(getHeaderBuf(msg).connection_id == this.recvConnectID) 
 			this._recv(msg);
+		process.stdout.clearLine() 
+		process.stdout.cursorTo(0)
+		process.stdout.write("Max window size " + this.sendBuffer.maxWindowBytes + " | Current window size: " + this.sendBuffer.curWindow() + " | Reply micro " + this.reply_micro)
 	})	
 
 	this.connecting = true;
@@ -195,12 +198,15 @@ Socket.prototype._sendData = function() {
 		}
 
 		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
+			//console.log("sendBuffer is full:", this.sendBuffer.isBufferFull(), "what is this", this.sendBuffer.maxRecvWindowBytes - this.sendBuffer.packetSize)
+			//console.log("is window full", this.sendBuffer.isWindowFull(), "cur window", this.sendBuffer.curWindow())
 			let next = this.sendBuffer.getNext()
 			let time = this.timeStamp()
 			next.timeStamp = time
 			next.timer = setTimeout((function() {
 				console.log("current seq num", this.sendBuffer.ackNum())
-				this.sendBuffer.changeWindowSize(this.packet_size); console.log("Timeout:", next.seq, "| Time:", time/1e3, "| default_timeout:",this.default_timeout)
+				this.sendBuffer.changeWindowSize(this.packet_size); 
+				console.log("Timeout:", next.seq, "| Time:", time/1e3, "| default_timeout:",this.default_timeout)
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
 
@@ -285,7 +291,7 @@ Socket.prototype._recv = function(msg) {
 				let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
 				this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
 				this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
-				console.log("scaledGain", this.sendBuffer.maxWindowBytes)
+				this.windowSizes.push(this.sendBuffer.maxWindowBytes)
 				scaledGain()
 			}).bind(this) , this.rtt / 1000);
 		}).bind(this)
@@ -396,7 +402,8 @@ Socket.prototype.makeHeader = function(type, seq_nr, ack_nr) { //no side effects
 		'ver' : VERSION,
 		'connection_id' : type == ST_SYN ? this.recvConnectID : this.sendConnectID,
 		'timestamp_microseconds' : this.timeStamp(),  
-		'timestamp_difference_microseconds' : Math.abs(this.reply_micro % Math.pow(2,32)),
+		'timestamp_difference_microseconds' : Math.abs(this.timestamp_difference_microseconds % Math.pow(2,32) ),
+		 //Math.abs(this.reply_micro % Math.pow(2,32)),
 		'wnd_size' : DEFAULT_RECV_WINDOW_SIZE,
 		'seq_nr' : seq_nr ? seq_nr : this.seq_nr,
 		'ack_nr' : ack_nr ? ack_nr : this.ack_nr,
