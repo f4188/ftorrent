@@ -146,10 +146,6 @@ Socket.prototype.connect = function (port, host) {
 			this._recv(msg);
 	})	
 
-	//if(this.win_reply_micro.isEmpty())return
-	
-		
-//win_reply_micro.peekMinTime().time
 	var scaledGain = function(minTime, timestampDiff, curWindow, maxWindow, packet_size) {
 		let base_delay = Math.abs(minTime - timestampDiff)
 		let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
@@ -320,7 +316,13 @@ Socket.prototype._recv = function(msg) {
 	logger.info(header.timestamp_microseconds, header.seq_nr)
 
 	//wrap around seq num rejected
-	if(header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr < this.recvWindow.ackNum() - 4 * this.recvWindow.maxWindowBytes) return 
+	//assume send window is never larger then 100 packets. also since acknum > beginning of send window, worst case no ack has reached sender and send window
+	//is max send window behind recieve window. Special case if ackNum is within max send window of 0. Then nums close to 2^16 should also be rejected
+	//smallest packet size 150 bytes, max send/recv buffers around 200 kB ~ 1000 packets - rare condition
+	let pktzn = 1000
+	if (header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr > this.recvWindow.ackNum() - pktzn && this.recvWindow.ackNum() > pktzn 
+	|| this.recvWindow.ackNum() < pktzn && header.seq_nr > Math.pow(2,16) - pktzn) return
+	//if(header.seq_nr <= this.recvWindow.ackNum() && !((this.recvWindow.ackNum() > 100) && header.seq_nr < this.recvWindow.ackNum() - 100)) return 
 	
 	this.recvWindow.insert(header.seq_nr, data) //assumes seqnum > acknum
 	let packs = this.recvWindow.removeSequential()	
