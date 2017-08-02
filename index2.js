@@ -270,7 +270,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
-	logger.info(header.timestamp_microseconds, header.seq_nr)
+	logger.info(header)
 	this._updateWinReplyMicro(header)
 	
 	if(header.type == ST_SYN) { 
