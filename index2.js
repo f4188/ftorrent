@@ -204,9 +204,9 @@ Socket.prototype._sendData = function() {
 			let time = this.timeStamp()
 			next.timeStamp = time
 			next.timer = setTimeout((function() {
-				console.log("current seq num", this.sendBuffer.ackNum())
+				//console.log("current seq num", this.sendBuffer.ackNum())
 				this.sendBuffer.changeWindowSize(this.packet_size); 
-				console.log("Timeout:", next.seq, "| Time:", time/1e3, "| default_timeout:",this.default_timeout)
+				//console.log("Timeout:", next.seq, "| Time:", time/1e3, "| default_timeout:",this.default_timeout)
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
 
@@ -237,7 +237,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
-		console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
+		//console.log("Dup Ack: Expected", (this.sendBuffer.ackNum() + 1), "got", ackNum)
 		this.dupAck = 0;
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
