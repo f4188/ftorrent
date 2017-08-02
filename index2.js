@@ -270,6 +270,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
+	logger.info(header.timestamp_microseconds, header.seq_nr)
 	this._updateWinReplyMicro(header)
 	
 	if(header.type == ST_SYN) { 
@@ -318,7 +319,7 @@ Socket.prototype._recv = function(msg) {
 }
  
  Socket.prototype._recvData = function(header, data) {
-	logger.info(header.timestamp_microseconds, header.seq_nr)
+	
 
 	//wrap around seq num rejected
 	//assume send window is never larger then 100 packets. also since acknum > beginning of send window, worst case no ack has reached sender and send window
