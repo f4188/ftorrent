@@ -67,7 +67,7 @@ Server.prototype.listen = function(port, connectListener) {
 			this.conSockets[id].total += data.length; 
 			//process.stdout.clearLine() 
 			process.stdout.cursorTo(0)
-			process.stdout.write("Total: " +  (this.conSockets[id].total / 1000).toPrecision(8) + " KB | DR (2 sec avg): " + (speed(data.length)*8 / 1000) + " Kbps | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7) + " | DR (1 min avg): " + (speed2(data.length)*8/1000).toPrecision(5) );
+			process.stdout.write("Total: " +  (this.conSockets[id].total / 1000).toPrecision(8) + " KB | DR: " + (speed(data.length)*8 / 1000) + " (2 sec avg) Kbps | DR: " + (speed2(data.length)*8/1000).toPrecision(5) + " (1 min avg) | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7));
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
@@ -145,9 +145,9 @@ Socket.prototype.connect = function (port, host) {
 	this.udpSock.on('message', (msg, rinfo) => {
 		if(getHeaderBuf(msg).connection_id == this.recvConnectID) 
 			this._recv(msg);
-		process.stdout.clearLine() 
+		//process.stdout.clearLine() 
 		process.stdout.cursorTo(0)
-		process.stdout.write("Max window size " + this.sendBuffer.maxWindowBytes + " | Current window size: " + this.sendBuffer.curWindow() + " | Reply micro " + this.reply_micro)
+		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Reply micro " + this.reply_micro)
 	})	
 
 	this.connecting = true;
