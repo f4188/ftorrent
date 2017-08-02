@@ -67,7 +67,7 @@ Server.prototype.listen = function(port, connectListener) {
 			this.conSockets[id].total += data.length; 
 			//process.stdout.clearLine() 
 			process.stdout.cursorTo(0)
-			process.stdout.write("Total: " + ("          " + (this.conSockets[id].total / 1000)).slice(-10) + " KB | Download rate: " + (speed(data.length)*8 / 1000) + " Kbps | Reply micro: " + ("            " + this.conSockets[id].reply_micro).slice(8) + " | Dwn: " + speed2(data.length)*8/1000 );
+			process.stdout.write("Total: " + ("          " + (this.conSockets[id].total / 1000)).slice(-10) + " KB | DR (2 sec avg): " + (speed(data.length)*8 / 1000) + " Kbps | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7) + " | DR (1 min avg): " + speed2(data.length)*8/1000 );
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
