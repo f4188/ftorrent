@@ -264,7 +264,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
-	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
+	if(this.sendBuffer) this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._updateWinReplyMicro(header)
 	
 	if(header.type == ST_SYN) { //handle spurious syn and first syn
