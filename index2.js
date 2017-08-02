@@ -22,12 +22,13 @@ const ST_SYN  = 4
 const VERSION = 1
 
 const INITIAL_PACKET_SIZE = 1500
-const CCONTROL_TARGET = 300000
+const CCONTROL_TARGET = 100000
 const MAX_CWND_INCREASE_PACKETS_PER_RTT =  INITIAL_PACKET_SIZE
+const DEFAULT_WIN_UDP_BUFFER = 8000
 const DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
-const DEFAULT_RECV_WINDOW_SIZE = 4 * 1500
+const DEFAULT_RECV_WINDOW_SIZE = 5 * 1500
 const KEEP_ALIVE_INTERVAL = 120000 //millis
-const MIN_DEFAULT_TIMEOUT = 500000 //micros
+const MIN_DEFAULT_TIMEOUT = 800000 //micros
 
 function createServer() {
 	logger.add(winston.transports.File, { filename: './server.log' });
@@ -146,18 +147,6 @@ Socket.prototype.connect = function (port, host) {
 			this._recv(msg);
 	})	
 
-	var scaledGain = function(minTime, timestampDiff, curWindow, maxWindow, packet_size) {
-		let base_delay = Math.abs(minTime - timestampDiff)
-		let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
-		maxWindow +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * (curWindow / maxWindow)	
-		return (maxWindow < packet_size)? packet_size : maxWindow
-	}
-	
-	let self = this
-	setTimeout(function() {
-		self.sendBuffer.maxWindowBytes = scaledGain(self.timestamp_difference_microseconds, self.win_reply_micro.peekMinTime(), self.sendBuffer.curWindow(), self.sendBuffer.maxWindowBytes, self.packet_size)
-	}, self.rtt)
-
 	this.connecting = true;
 	this._sendSyn()
 }
@@ -173,7 +162,9 @@ Socket.prototype._sendSyn = function() { //called by connect
 	this.sendBuffer = new WindowBuffer(seq_nr, DEFAULT_INITIAL_WINDOW_SIZE, -1, this.packet_size)
 	let header = this.makeHeader(ST_SYN, seq_nr, null)
 	//syn(3)
+	let self = this
 	this._send(header);
+	
 } 
 
 Socket.prototype._recvSyn = function(header) {
@@ -263,20 +254,18 @@ Socket.prototype._calcNewTimeout = function(timeStamps) {
 }
 
 Socket.prototype._updateWinReplyMicro = function(header) {
-	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
-
 	let time = this.timeStamp()
+	this.reply_micro = header.timestamp_difference_microseconds
+	this.timestamp_difference_microseconds = Math.abs(Math.abs(time) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
+	//header.timestamp_difference_microseconds
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
-	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)
-	//if(this.win_reply_micro.isEmpty())return
-	
+	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)	
 }
 
 Socket.prototype._recv = function(msg) { 
 	header = getHeaderBuf(msg)
-	this.timestamp_difference_microseconds = header.timestamp_difference_microseconds
-	this.timeOutMult = 1;
-	this.reply_micro = Math.abs(Math.abs(this.timeStamp()) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
+	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
+	this._updateWinReplyMicro(header)
 	
 	if(header.type == ST_SYN) { //handle spurious syn and first syn
 		if(!this.connected)
@@ -291,6 +280,17 @@ Socket.prototype._recv = function(msg) {
 			this.recvWindow = new WindowBuffer(header.seq_nr, -1, DEFAULT_RECV_WINDOW_SIZE, this.packet_size)	
 			this.emit('connected')
 		}
+		var scaledGain = (function() {
+			setTimeout( (function() {
+				let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
+				let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
+				this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
+				this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
+				console.log("scaledGain", this.sendBuffer.maxWindowBytes)
+				scaledGain()
+			}).bind(this) , this.rtt / 1000);
+		}).bind(this)
+		scaledGain()
 	} else if (header.type == ST_FIN) {
 		this.disconnecting = true
 		this.eof_pkt = header.seq_nr;
@@ -302,8 +302,7 @@ Socket.prototype._recv = function(msg) {
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 	this._calcNewTimeout(timeStamps)
-	this._updateWinReplyMicro(header)
-
+	
 	if(!this.eof_pkt) 
 		this._sendData()
 	
