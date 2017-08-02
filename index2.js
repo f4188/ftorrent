@@ -53,6 +53,7 @@ Server.prototype.listen = function(port, connectListener) {
 	this.udpSock.on('message', (msg, rinfo) => {
 		var header = getHeaderBuf(msg)
 		var id = rinfo.address + ":" + rinfo.port + "#" + ((header.type != ST_SYN) ? header.connection_id : (header.connection_id + 1));
+		logger.info("Got:",header)
 		if(this.conSockets[id]) 
 			return this.conSockets[id]._recv(msg);
 		
@@ -223,6 +224,7 @@ Socket.prototype._sendState = function(seq_nr, ack_nr) {
 }
 
 Socket.prototype._send = function(header, data) {
+	logger.info(header)
 	let bufHeader = getBufHeader(header)
 	let packet = data != undefined ? Buffer.concat([bufHeader, data]) : bufHeader
 	this.udpSock.send(packet, this.port, this.host)
