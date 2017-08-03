@@ -16,6 +16,7 @@
     "forever": "^0.15.3",
     "get-port": "^3.1.0",
     "getport": "^0.1.0",
+    "git": "^0.1.5",
     "gulp-exec": "^2.1.3",
     "gulp-shell": "^0.6.3",
     "minimist": "^1.2.0",

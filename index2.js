@@ -24,10 +24,10 @@ const ST_SYN  = 4
 
 INITIAL_PACKET_SIZE = 1500
 CCONTROL_TARGET = 100000
-MAX_CWND_INCREASE_PACKETS_PER_RTT =  INITIAL_PACKET_SIZE
+MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_WIN_UDP_BUFFER = 8000
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
-DEFAULT_RECV_WINDOW_SIZE = 5 * 1500
+DEFAULT_RECV_WINDOW_SIZE = 5 * 1500 * 3
 KEEP_ALIVE_INTERVAL = 120000 //millis
 MIN_DEFAULT_TIMEOUT = 500000 //micros
 
@@ -88,15 +88,16 @@ function Socket(udpSock, port, host) {
 	Duplex.call(this)	
 	this.port = port;
 	this.host = host;
-	this.base_delay = 300
+	//this.base_delay = 300
 	this.total = 0
 
 	this.dataBuffer = Buffer.alloc(0)
-	this.sendBuffer;
+	this.sendBuffer; //fix names
 	this.recvWindow;
 
 	this.keepAlive;
 	this.synTimer;
+	this.scaledGainTimer;
 	
 	this.udpSock = udpSock;
 
@@ -113,15 +114,15 @@ function Socket(udpSock, port, host) {
 
 	this.eof_pkt = null;
 	
-	this.reply_micro = 250*1e3
+	this.reply_micro = 250*1e3 //sensible defaults
 	this.default_timeout = MIN_DEFAULT_TIMEOUT
-	this.rtt = 500000;
-	this.rtt_var = 100000;
+	this.rtt = 500*1e3;
+	this.rtt_var = 100*1e3;
 	
 	this.sendConnectID; 
 	this.recvConnectID; 
 	
-	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) }
+	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) } //not really a microsecond timestamp
 
 	this.win_reply_micro = new TQueue()
 	this.timestamp_difference_microseconds = 250*1e3
@@ -168,7 +169,6 @@ Socket.prototype._sendSyn = function() { //called by connect
 	//syn(3)
 	let self = this
 	this._send(header);
-	
 } 
 
 Socket.prototype._recvSyn = function(header) {
@@ -188,7 +188,6 @@ Socket.prototype._sendFin = function() {
 }
 
 Socket.prototype._sendData = function() {
-
 	while((!this.sendBuffer.isBufferFull() && (this.dataBuffer.length > this.packet_size || (!this.finished && this.dataBuffer.length)))
 		|| (this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())) {
 
@@ -289,7 +288,7 @@ Socket.prototype._recv = function(msg) {
 			this.emit('connected')
 		}
 		var scaledGain = (function() { 
-			setTimeout( (function() {
+			this.scaledGainTimer = setTimeout( (function() {
 				let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 				let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
 				this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
@@ -298,7 +297,7 @@ Socket.prototype._recv = function(msg) {
 				scaledGain()
 			}).bind(this) , this.rtt / 1000);
 		}).bind(this)
-		scaledGain() //only start scaled gain after sender begins sending data
+		scaledGain() //start scaled gain (for both sides) after sender begins sending data 
 	} else if (header.type == ST_FIN) {
 		this.disconnecting = true
 		this.eof_pkt = header.seq_nr;
