@@ -28,7 +28,7 @@ INITIAL_PACKET_SIZE = 1500
 CCONTROL_TARGET = 100000
 MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
-DEFAULT_RECV_WINDOW_SIZE = 100000 //
+DEFAULT_RECV_WINDOW_SIZE = 100000 // 100kB
 KEEP_ALIVE_INTERVAL = 120000 //millis
 MIN_DEFAULT_TIMEOUT = 500000 //micros
 
@@ -161,15 +161,19 @@ Socket.prototype._sendSyn = function() { //called by connect
 	let seq_nr = Crypto.randomBytes(2).readUInt16BE();
 	this.recvConnectID = Crypto.randomBytes(2).readUInt16BE();
 	this.sendConnectID = this.recvConnectID + 1;
-	/* function syn(i) {
-		this._send(header)
-		if(i > 0) this.synTimer = setTimeout(syn, this.default_timeout)
-	} */
 	this.sendBuffer = new WindowBuffer(seq_nr, DEFAULT_INITIAL_WINDOW_SIZE, -1, this.packet_size)
 	let header = this.makeHeader(ST_SYN, seq_nr, null)
-	//syn(3)
-	let self = this
-	this._send(header);
+	let i = 3
+	let tTime = this.default_timeout
+	var syn = function() {
+		this._send(header)
+		i--
+		tTime *= 2;
+		if(i > 0) this.synTimer = setTimeout(syn, tTime)
+		else console.log("Timeout:")
+	} 
+	syn(3)
+	//this._send(header);
 } 
 
 Socket.prototype._recvSyn = function(header) {
