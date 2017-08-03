@@ -165,13 +165,13 @@ Socket.prototype._sendSyn = function() { //called by connect
 	let header = this.makeHeader(ST_SYN, seq_nr, null)
 	let i = 3
 	let tTime = this.default_timeout
-	var syn = function() {
+	var syn = (function() {
 		this._send(header)
 		i--
 		tTime *= 2;
 		if(i > 0) this.synTimer = setTimeout(syn, tTime)
 		else console.log("Timeout:")
-	} 
+	}).bind(this) 
 	syn(3)
 	//this._send(header);
 } 
