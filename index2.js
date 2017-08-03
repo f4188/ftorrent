@@ -68,7 +68,7 @@ Server.prototype.listen = function(port, connectListener) {
 			this.conSockets[id].total += data.length; 
 			//process.stdout.clearLine() 
 			process.stdout.cursorTo(0)
-			process.stdout.write("Total: " +  (this.conSockets[id].total / 1000).toPrecision(8) + " KB | DR: " + (speed(data.length)*8 / 1000) + " Kb/s (2 sec avg) | DR: " + (speed2(data.length)*8/1000).toPrecision(5) + " Kb/s (1 min avg) | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7));
+			process.stdout.write("Total: " +  (this.conSockets[id].total / 1000).toPrecision(8) + " KB | DR: " + (speed(data.length)*8 / 1000) + " Kb/s (2 sec avg) | DR: " + (speed2(data.length)*8/1000).toPrecision(5) + " Kb/s (1 min avg) | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7) + " | Base Delay: " + (this.conSockets[id].reply_micro - this.conSockets[id].win_reply_micro.peekMinTime()));
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
