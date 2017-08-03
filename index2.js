@@ -330,7 +330,7 @@ Socket.prototype._recv = function(msg) {
 	
 	this.recvWindow.insert(header.seq_nr, data) //assumes seqnum > acknum
 	let packs = this.recvWindow.removeSequential()	
-	packs.forEach((pack)=>{this.push(elem)}, this)
+	packs.forEach((pack)=>{this.push(pack)}, this)
 	//while(packs.length > 0)
 	//	this.push(packs.shift())
 	
