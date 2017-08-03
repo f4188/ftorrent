@@ -149,7 +149,7 @@ Socket.prototype.connect = function (port, host) {
 			this._recv(msg);
 		//process.stdout.clearLine() 
 		process.stdout.cursorTo(0)
-		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Reply micro " + (this.reply_micro).toPrecision(6) + " | Base delay: " + (this.reply_micro - this.win_reply_micro.peekMinTime()))
+		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Reply micro " + ("       " + (this.reply_micro).toPrecision(6)).slice(-8) + " | Base delay: " + (this.reply_micro - this.win_reply_micro.peekMinTime()))
 	})	
 
 	this.connecting = true;
