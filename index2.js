@@ -279,7 +279,7 @@ Socket.prototype._recv = function(msg) {
 		if(!this.connected)
 			this._recvSyn(header)
 		return //trying to reconnect?
-	} else if (this.connecting & !this.connected) {
+	} else if (this.connecting & !this.connected) { //establish connection for both syn'er and recv syn'er
 		this.connecting = false;
 		this.connected = true;
 		console.log('Connection established')
@@ -288,7 +288,7 @@ Socket.prototype._recv = function(msg) {
 			this.recvWindow = new WindowBuffer(header.seq_nr, -1, DEFAULT_RECV_WINDOW_SIZE, this.packet_size)	
 			this.emit('connected')
 		}
-		var scaledGain = (function() {
+		var scaledGain = (function() { 
 			setTimeout( (function() {
 				let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 				let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
@@ -298,7 +298,7 @@ Socket.prototype._recv = function(msg) {
 				scaledGain()
 			}).bind(this) , this.rtt / 1000);
 		}).bind(this)
-		scaledGain()
+		scaledGain() //only start scaled gain after sender begins sending data
 	} else if (header.type == ST_FIN) {
 		this.disconnecting = true
 		this.eof_pkt = header.seq_nr;
@@ -321,21 +321,18 @@ Socket.prototype._recv = function(msg) {
 }
  
  Socket.prototype._recvData = function(header, data) {
-	
-
-	//wrap around seq num rejected
-	//assume send window is never larger then 100 packets. also since acknum > beginning of send window, worst case no ack has reached sender and send window
-	//is max send window behind recieve window. Special case if ackNum is within max send window of 0. Then nums close to 2^16 should also be rejected
+	//Assume send window is never larger then 300 packets. Since acknum recvWindow > ackNum sendWindow: worst case no ack has reached sender and send window
+	//is max 300 pkts behind recieve window. Special case if ackNum is within 300 pkts of 0. Then nums close to 2^16 should also be rejected
 	//smallest packet size 150 bytes, max send/recv buffers around 200 kB ~ 1000 packets - rare condition
 	let pktzn = 300
 	if (header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr > this.recvWindow.ackNum() - pktzn && this.recvWindow.ackNum() >= pktzn 
 	|| this.recvWindow.ackNum() < pktzn && header.seq_nr > Math.pow(2,16) - pktzn) return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
-	//if(header.seq_nr <= this.recvWindow.ackNum() && !((this.recvWindow.ackNum() > 100) && header.seq_nr < this.recvWindow.ackNum() - 100)) return 
 	
 	this.recvWindow.insert(header.seq_nr, data) //assumes seqnum > acknum
 	let packs = this.recvWindow.removeSequential()	
-	while(packs.length > 0)
-		this.push(packs.shift())
+	packs.forEach((pack)=>{this.push(elem)}, this)
+	//while(packs.length > 0)
+	//	this.push(packs.shift())
 	
 	if(this.disconnecting && this.eof_pkt & (this.ack_nr == this.eof_pkt)) {
 		if(this.connected) {
