@@ -24,7 +24,7 @@ const ST_SYN  = 4
 
 DEFAULT_WIN_UDP_BUFFER = 8000
 
-INITIAL_PACKET_SIZE = 1500
+INITIAL_PACKET_SIZE = 500
 CCONTROL_TARGET = 100000
 MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
@@ -77,7 +77,10 @@ Server.prototype.listen = function(port, connectListener) {
 }
 
 Server.prototype.close = function() {
-	
+	this.conSockets.forEach((sock, i)=>{
+		sock._sendFin()
+		//sock.on('finish') delete this.conSockets[i]
+	})
 }
 
 function createSocket() {
@@ -89,7 +92,6 @@ function Socket(udpSock, port, host) {
 	Duplex.call(this)	
 	this.port = port;
 	this.host = host;
-	//this.base_delay = 300
 	this.total = 0
 
 	this.dataBuffer = Buffer.alloc(0)
@@ -218,6 +220,7 @@ Socket.prototype._sendData = function() {
 	}
 
 	if(this.dataBuffer.length < this.packet_size ) this.emit('databuffer:length<packet_size')
+	if(finished && this.databuffer.length == 0) this.emit('killme')
 }
 
 Socket.prototype._sendState = function(seq_nr, ack_nr) { 
@@ -279,7 +282,7 @@ Socket.prototype._recv = function(msg) {
 		if(!this.connected)
 			this._recvSyn(header)
 		return //trying to reconnect?
-	} else if (this.connecting & !this.connected) { //establish connection for both syn'er and recv syn'er
+	} else if (this.connecting & !this.connected & header.type != ST_RESET & header.type != ST_FIN) { //establish connection for both syn'er and recv syn'er
 		this.connecting = false;
 		this.connected = true;
 		console.log('Connection established')
@@ -299,7 +302,14 @@ Socket.prototype._recv = function(msg) {
 			}).bind(this) , this.rtt / 1000);
 		}).bind(this)
 		scaledGain() //start scaled gain (for both sides) after sender begins sending data 
+	} else if (!this.connected && !this.connecting) { //maybe reset, fin, state or data
+		return // may be send reset ??
 	} else if (header.type == ST_FIN) {
+		if(this.disconnecting) { //this socket sent fin
+			this.connected = false
+			this.disconnecting = false
+			//emit killme
+		}
 		this.disconnecting = true
 		this.eof_pkt = header.seq_nr;
 	} else if (header.type == ST_RESET) {
@@ -335,6 +345,7 @@ Socket.prototype._recv = function(msg) {
 		if(this.connected) {
 			this._sendFin()
 			this.connected = false;
+			this.disconnecting = false;
 		}
 		this._close() //final shutdown
 		return
@@ -343,12 +354,16 @@ Socket.prototype._recv = function(msg) {
 	this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
  }
  
-Socket.prototype._close = function() { //fin exchanged
-	//this._sendFin()
+Socket.prototype._close = function() { 
+	//fins already exchanged
+	//handle final cleanup
 }
  
 Socket.prototype.close = function() { //send fin, wait for fin reply
 	this._sendFin()
+	//wait for killme
+	//reset socket?
+
 }
 
 Socket.prototype._read = function() {}
