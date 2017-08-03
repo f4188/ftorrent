@@ -22,12 +22,13 @@ const ST_STATE = 2 //Ack
 const ST_RESET = 3  
 const ST_SYN  = 4
 
+DEFAULT_WIN_UDP_BUFFER = 8000
+
 INITIAL_PACKET_SIZE = 1500
 CCONTROL_TARGET = 100000
 MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
-DEFAULT_WIN_UDP_BUFFER = 8000
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
-DEFAULT_RECV_WINDOW_SIZE = 5 * 1500 * 3
+DEFAULT_RECV_WINDOW_SIZE = 100000 //
 KEEP_ALIVE_INTERVAL = 120000 //millis
 MIN_DEFAULT_TIMEOUT = 500000 //micros
 
@@ -198,13 +199,10 @@ Socket.prototype._sendData = function() {
 		}
 
 		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
-			//console.log("sendBuffer is full:", this.sendBuffer.isBufferFull(), "what is this", this.sendBuffer.maxRecvWindowBytes - this.sendBuffer.packetSize)
-			//console.log("is window full", this.sendBuffer.isWindowFull(), "cur window", this.sendBuffer.curWindow())
 			let next = this.sendBuffer.getNext()
 			let time = this.timeStamp()
 			next.timeStamp = time
 			next.timer = setTimeout((function() {
-				//console.log("current seq num", this.sendBuffer.ackNum())
 				this.sendBuffer.changeWindowSize(this.packet_size); 
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this._sendData()
@@ -264,7 +262,6 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	let time = this.timeStamp()
 	this.reply_micro = header.timestamp_difference_microseconds
 	this.timestamp_difference_microseconds = Math.abs(Math.abs(time) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
-	//header.timestamp_difference_microseconds
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
 	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)	
 }
@@ -323,15 +320,12 @@ Socket.prototype._recv = function(msg) {
 	//Assume send window is never larger then 300 packets. Since acknum recvWindow > ackNum sendWindow: worst case no ack has reached sender and send window
 	//is max 300 pkts behind recieve window. Special case if ackNum is within 300 pkts of 0. Then nums close to 2^16 should also be rejected
 	//smallest packet size 150 bytes, max send/recv buffers around 200 kB ~ 1000 packets - rare condition
-	let pktzn = 300
-	if (header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr > this.recvWindow.ackNum() - pktzn && this.recvWindow.ackNum() >= pktzn 
-	|| this.recvWindow.ackNum() < pktzn && header.seq_nr > Math.pow(2,16) - pktzn) return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
+	let drpZn = 300
+	if (header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr > this.recvWindow.ackNum() - drpZn && this.recvWindow.ackNum() >= drpZn 
+	|| this.recvWindow.ackNum() < drpZn && header.seq_nr > Math.pow(2,16) - drpZn) return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
 	
 	this.recvWindow.insert(header.seq_nr, data) //assumes seqnum > acknum
-	let packs = this.recvWindow.removeSequential()	
-	packs.forEach((pack)=>{this.push(pack)}, this)
-	//while(packs.length > 0)
-	//	this.push(packs.shift())
+	this.recvWindow.removeSequential().forEach((pack)=>{this.push(pack)}, this)
 	
 	if(this.disconnecting && this.eof_pkt & (this.ack_nr == this.eof_pkt)) {
 		if(this.connected) {
