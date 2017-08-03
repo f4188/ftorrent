@@ -220,7 +220,7 @@ Socket.prototype._sendData = function() {
 	}
 
 	if(this.dataBuffer.length < this.packet_size ) this.emit('databuffer:length<packet_size')
-	if(finished && this.databuffer.length == 0) this.emit('killme')
+	if(this.finished && this.databuffer.length == 0) this.emit('killme')
 }
 
 Socket.prototype._sendState = function(seq_nr, ack_nr) { 
