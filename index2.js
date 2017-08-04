@@ -331,9 +331,10 @@ Socket.prototype._recv = function(msg) {
 }
  
  Socket.prototype._recvData = function(header, data) {
-	//Assume send window is never larger then 300 packets. Since acknum recvWindow > ackNum sendWindow: worst case no ack has reached sender and send window
-	//is max 300 pkts behind recieve window. Special case if ackNum is within 300 pkts of 0. Then nums close to 2^16 should also be rejected
-	//smallest packet size 150 bytes, max send/recv buffers around 200 kB ~ 1000 packets - rare condition
+ 	//Must not insert seqs nums less then recvWindow's ackNum.
+	//Since Acknum recvWindow > ackNum sendWindow and (assuming) send window is never larger then 300 packets (drpZn), worst case no ack has reached sender and send window
+	//is max 300 pkt seqs nums behind recieve window. Reject all these seqs nums. Special case if ackNum is within 300 pkts of 0. Then nums close to 2^16 should also be rejected
+	//smallest packet size 150 bytes, max send/recv buffers around 200 kB ~ 1200 packets - rare condition
 	let drpZn = 300
 	if (header.seq_nr <= this.recvWindow.ackNum() && header.seq_nr > this.recvWindow.ackNum() - drpZn && this.recvWindow.ackNum() >= drpZn 
 	|| this.recvWindow.ackNum() < drpZn && header.seq_nr > Math.pow(2,16) - drpZn) return this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
