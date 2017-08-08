@@ -225,7 +225,7 @@ Socket.prototype._sendState = function(seq_nr, ack_nr) {
 }
 
 Socket.prototype._send = function(header, data) {
-	this.uploadSpeed = speed3(data.length)
+	if(data) this.uploadSpeed = speed3(data.length)
 	let bufHeader = getBufHeader(header)
 	let packet = data != undefined ? Buffer.concat([bufHeader, data]) : bufHeader
 	this.udpSock.send(packet, this.port, this.host)
