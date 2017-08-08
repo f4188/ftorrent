@@ -325,10 +325,7 @@ Socket.prototype._recv = function(msg) {
 	} else if (header.type == ST_FIN) { //before connect/connecting or after?
 		this.recvFin = true
 		this.eof_pkt = header.seq_nr;
-	} else {
-		//garbage
-		return
-	}
+	} 
 
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._handleDupAck(header.ack_nr)
