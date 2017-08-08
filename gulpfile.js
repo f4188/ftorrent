@@ -38,6 +38,11 @@ gulp.task('test', (cb) => {
 });
 
 
+//git stash create > t.txt
+//set  /p VAR=<t.txt
+//git archive %VAR% -o latest2.tar
+//sudo scp -i f4188.pem "/mnt/c/Users/Fawaz A/Documents/Workspace/fztorrent/uTP/latest.tar" ec2-user@54.158.235.118:/home/ec2-user/
+//tar -xf latest.tar -C latest
 
 gulp.task('transfer', function(cb) {
 	exec('git stash create', function(err, stdout, stderr) {
