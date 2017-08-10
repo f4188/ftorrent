@@ -143,7 +143,7 @@ function Socket(udpSock, port, host) {
 	self = this
 	this.pacer = function() {
 		let timeout = 1
-		if(self.paceQueue) {
+		if(self.paceQueue.length) {
 			let pack = self.paceQueue.shift()
 			self.udpSock(pack.packet, pack.port, pack.host)
 		}
