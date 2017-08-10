@@ -136,6 +136,23 @@ function Socket(udpSock, port, host) {
 
 	this.win_reply_micro = new TQueue()
 	this.timestamp_difference_microseconds = 250*1e3
+
+	this.paceQueue = []
+	//this.pacerTimeout
+	//this.setInterval(, )
+	self = this
+	this.pacer = function() {
+		let timeout
+		setTimeout( function() {
+			if(self.paceQueue) {
+				let pack = self.paceQueue.shift()
+				self.udpSock(pack.packet, pack.port, pack.host)
+			}
+			timeout = (self.rtt / 1e3)/(self.paceQueue.length + 1)
+			self.pacer()
+		}, timeout)
+	}
+	this.pacer()
 }
 
 Util.inherits(Socket, Duplex)
@@ -228,7 +245,8 @@ Socket.prototype._send = function(header, data) {
 	if(data) this.uploadSpeed = speed3(data.length)
 	let bufHeader = getBufHeader(header)
 	let packet = data != undefined ? Buffer.concat([bufHeader, data]) : bufHeader
-	this.udpSock.send(packet, this.port, this.host)
+	//this.udpSock.send(packet, this.port, this.host)
+	this.paceQueue.push({'packet':packet, 'port':this.port, 'host':this.host})
 } 
 
 Socket.prototype._handleDupAck = function (ackNum) {
@@ -363,9 +381,9 @@ Socket.prototype._recv = function(msg) {
 	this._sendState(this.sendBuffer.seqNum() - 1, this.recvWindow.ackNum());
  }
  
-Socket.prototype.end = function(callback) { //send fin, wait for fin reply
-	this._end(callback)
-}
+//Socket.prototype.end = function(callback) { //send fin, wait for fin reply
+//	this._end(callback)
+//}
 
 Socket.prototype._final = function(callback) {
 	this._end(callback)
@@ -377,6 +395,9 @@ Socket.prototype._end = function(callback) {
 	self = this
 	this.once('dataBuffer:empty', self._sendFin)
 	this.once('dataBuffer:empty', callback)
+	//
+	//this.sendWindow.isEmpty and this.recvFin==true 
+	//kill socket
 }
 
 Socket.prototype._read = function() {}
