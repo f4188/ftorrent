@@ -151,7 +151,7 @@ function Socket(udpSock, port, host) {
 		timeout = 10
 		setTimeout(self.pacer, timeout)
 	}
-	this.pacer()
+	//this.pacer()
 }
 
 Util.inherits(Socket, Duplex)
@@ -244,8 +244,8 @@ Socket.prototype._send = function(header, data) {
 	if(data) this.uploadSpeed = speed3(data.length)
 	let bufHeader = getBufHeader(header)
 	let packet = data != undefined ? Buffer.concat([bufHeader, data]) : bufHeader
-	//this.udpSock.send(packet, this.port, this.host)
-	this.paceQueue.push({'packet':packet, 'port':this.port, 'host':this.host})
+	this.udpSock.send(packet, this.port, this.host)
+	//this.paceQueue.push({'packet':packet, 'port':this.port, 'host':this.host})
 } 
 
 Socket.prototype._handleDupAck = function (ackNum) {
