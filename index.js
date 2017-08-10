@@ -278,7 +278,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.lastDupAck = ackNum
 		self = this
 		this.dupAcktTimer = setTimeout(()=>{self.lastDupack = null}, this.rtt + 2*this.rtt_var)
-		this.sendBuffer.getTimer(ackNum) = setTimeout((function() {
+		this.sendBuffer.getTimer().timer = setTimeout((function() {
 				this.sendBuffer.changeWindowSize(this.packet_size); 
 				this._sendData()
 		}).bind(this) , this.default_timeout  / 1000)
