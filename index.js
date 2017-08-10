@@ -29,7 +29,7 @@ MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
 DEFAULT_RECV_WINDOW_SIZE = 100000 // 100kB
 KEEP_ALIVE_INTERVAL = 120000 //millis
-MIN_DEFAULT_TIMEOUT = 500000 //micros
+MIN_DEFAULT_TIMEOUT = 2000000 //micros
 
 function createServer() {
 	return new Server()
@@ -286,7 +286,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		let pack = this.sendBuffer.get(lastAck + 1)
 		time = this.timeStamp()
 		pack.timeStamp = time
-		clearTimeout(pack.timer)
+		clearTimeout(pack.timer)  //need to reset all timers in window
 		pack.timer = setTimeout((function() {
 				self.sendBuffer.changeWindowSize(self.packet_size); 
 				self._sendData()
