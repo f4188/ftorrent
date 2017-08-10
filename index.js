@@ -278,10 +278,15 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.lastDupAck = ackNum
 		self = this
 		this.dupAcktTimer = setTimeout(()=>{self.lastDupack = null}, this.rtt + 2*this.rtt_var)
-		this.sendBuffer.getTimer().timer = setTimeout((function() {
+
+		let pack = this.sendBuffer.get(ackNum)
+		time = this.timeStamp()
+		pack.timeStamp = time
+		pack.timer = setTimeout((function() {
 				this.sendBuffer.changeWindowSize(this.packet_size); 
 				this._sendData()
 		}).bind(this) , this.default_timeout  / 1000)
+		
 
 
 		let size = this.sendBuffer.maxWindowBytes / 2
