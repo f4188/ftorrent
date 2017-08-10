@@ -177,7 +177,7 @@ Socket.prototype.connect = function (port, host) {
 		//process.stdout.clearLine() 
 		process.stdout.cursorTo(0)
 		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Upload: " + this.uploadSpeed * 8 +  " | Reply micro " + ("       " + (this.reply_micro).toPrecision(6)).slice(-8) + " | Base delay: " + (this.reply_micro - this.win_reply_micro.peekMinTime()))
-		buf = new Buffer()
+		buf = new Buffer(4)
 		buf.writeUInt32BE(this.sendBuffer.curWindow())
 		this.file.write(buf)
 	})	
