@@ -24,7 +24,7 @@ const ST_SYN  = 4
 DEFAULT_WIN_UDP_BUFFER = 8000
 
 INITIAL_PACKET_SIZE = 500
-CCONTROL_TARGET = 100000
+CCONTROL_TARGET = 50000
 MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
 DEFAULT_RECV_WINDOW_SIZE = 100000 // 100kB
@@ -149,6 +149,9 @@ function Socket(udpSock, port, host) {
 		}
 		//timeout = ((self.reply_micro + self.timestamp_difference_microseconds) / 1e3)/(self.paceQueue.length + 1)
 		timeout = 10
+
+		//timeSinceLastPackSent
+		//timeout = 1000/timeSinceLastPackSent
 		setTimeout(self.pacer, timeout)
 	}
 	//this.pacer()
