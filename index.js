@@ -24,7 +24,7 @@ const ST_SYN  = 4
 DEFAULT_WIN_UDP_BUFFER = 8000
 
 INITIAL_PACKET_SIZE = 500
-CCONTROL_TARGET = 50000
+CCONTROL_TARGET = 100000
 MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
 DEFAULT_RECV_WINDOW_SIZE = 100000 // 100kB
@@ -155,6 +155,13 @@ function Socket(udpSock, port, host) {
 		setTimeout(self.pacer, timeout)
 	}
 	//this.pacer()
+	/*
+	this.statServer = http.createServer((req,res) => {
+		res.write(this.sendBuffer.curWindow())
+		res.end()
+	})
+	this.statServer.listen(3000)*/
+	this.file = fs.createWriteStream('./windowsize.log')
 }
 
 Util.inherits(Socket, Duplex)
@@ -170,6 +177,7 @@ Socket.prototype.connect = function (port, host) {
 		//process.stdout.clearLine() 
 		process.stdout.cursorTo(0)
 		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Upload: " + this.uploadSpeed * 8 +  " | Reply micro " + ("       " + (this.reply_micro).toPrecision(6)).slice(-8) + " | Base delay: " + (this.reply_micro - this.win_reply_micro.peekMinTime()))
+		this.file.write(this.sendBuffer.curWindow())
 	})	
 
 	this.connecting = true;
