@@ -279,7 +279,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		self = this
 		this.dupAcktTimer = setTimeout(()=>{self.lastDupack = null}, this.rtt + 2*this.rtt_var)
 
-		let pack = this.sendBuffer.get(ackNum)
+		let pack = this.sendBuffer.get(ackNum + 1)
 		time = this.timeStamp()
 		pack.timeStamp = time
 		pack.timer = setTimeout((function() {
