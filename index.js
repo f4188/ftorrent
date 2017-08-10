@@ -276,19 +276,22 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		this.dupAck = 0;
 
+		///////////////////////////////////////////
 		this.lastDupAck = ackNum
 		self = this
+		clearTimeout(this.dupAcktTimer)
 		this.dupAcktTimer = setTimeout(()=>{self.lastDupAck = null}, this.rtt + 2*this.rtt_var)
 
 		let pack = this.sendBuffer.get(ackNum + 1)
 		time = this.timeStamp()
 		pack.timeStamp = time
+		clearTimeout(pack.timer)
 		pack.timer = setTimeout((function() {
 				self.sendBuffer.changeWindowSize(this.packet_size); 
 				self._sendData()
 		}).bind(this) , this.default_timeout  / 1000)
 		
-
+		/////////////////////////////////////////////////////////
 
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
