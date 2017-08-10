@@ -142,15 +142,14 @@ function Socket(udpSock, port, host) {
 	//this.setInterval(, )
 	self = this
 	this.pacer = function() {
-		let timeout
-		setTimeout( function() {
-			if(self.paceQueue) {
-				let pack = self.paceQueue.shift()
-				self.udpSock(pack.packet, pack.port, pack.host)
-			}
-			timeout = (self.rtt / 1e3)/(self.paceQueue.length + 1)
-			self.pacer()
-		}, timeout)
+		let timeout = 1
+		if(self.paceQueue) {
+			let pack = self.paceQueue.shift()
+			self.udpSock(pack.packet, pack.port, pack.host)
+		}
+		timeout = (self.rtt / 1e3)/(self.paceQueue.length + 1)
+
+		setTimeout(self.pacer, timeout)
 	}
 	this.pacer()
 }
