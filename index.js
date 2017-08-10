@@ -267,9 +267,9 @@ Socket.prototype._send = function(header, data) {
 Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.sendBuffer.isEmpty()) return
 	let lastAck = this.sendBuffer.ackNum()
-	if(ackNum != lastAck && ackNum != this.lastDupAck)
+	if(ackNum != lastAck)// && (!this.lastDupAck || ackNum != this.lastDupAck))
 		this.dupAck = 0
-	else 
+	else if( ackNum == null || ackNum != this.lastDupAck)
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
@@ -277,6 +277,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck = 0;
 
 		///////////////////////////////////////////
+
 		this.lastDupAck = ackNum
 		self = this
 		clearTimeout(this.dupAcktTimer)
