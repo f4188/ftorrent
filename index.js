@@ -145,7 +145,7 @@ function Socket(udpSock, port, host) {
 		let timeout = 1
 		if(self.paceQueue.length) {
 			let pack = self.paceQueue.shift()
-			self.udpSock(pack.packet, pack.port, pack.host)
+			self.udpSock.send(pack.packet, pack.port, pack.host)
 		}
 		timeout = (self.rtt / 1e3)/(self.paceQueue.length + 1)
 
