@@ -147,8 +147,8 @@ function Socket(udpSock, port, host) {
 			let pack = self.paceQueue.shift()
 			self.udpSock.send(pack.packet, pack.port, pack.host)
 		}
-		timeout = ((self.reply_micro + self.timestamp_difference_microseconds) / 1e3)/(self.paceQueue.length + 1)
-
+		//timeout = ((self.reply_micro + self.timestamp_difference_microseconds) / 1e3)/(self.paceQueue.length + 1)
+		timeout = 10
 		setTimeout(self.pacer, timeout)
 	}
 	this.pacer()
