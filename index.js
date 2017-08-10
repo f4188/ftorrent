@@ -29,7 +29,7 @@ MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
 DEFAULT_RECV_WINDOW_SIZE = 100000 // 100kB
 KEEP_ALIVE_INTERVAL = 120000 //millis
-MIN_DEFAULT_TIMEOUT = 1000000 //micros
+MIN_DEFAULT_TIMEOUT = 500000 //micros
 
 function createServer() {
 	return new Server()
@@ -136,6 +136,9 @@ function Socket(udpSock, port, host) {
 
 	this.win_reply_micro = new TQueue()
 	this.timestamp_difference_microseconds = 250*1e3
+
+	this.lastDupAck = null
+	this.dupAcktTimer
 
 	this.paceQueue = []
 	//this.pacerTimeout
@@ -264,7 +267,7 @@ Socket.prototype._send = function(header, data) {
 Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.sendBuffer.isEmpty()) return
 	let lastAck = this.sendBuffer.ackNum()
-	if(ackNum != lastAck)
+	if(ackNum != lastAck && ackNum != this.lastDupack)
 		this.dupAck = 0
 	else 
 		this.dupAck++;
@@ -272,6 +275,15 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.dupAck == 3) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		this.dupAck = 0;
+		this.lastDupAck = ackNum
+		self = this
+		this.dupAcktTimer = setTimeout(()=>{self.lastDupack = null}, this.rtt + 2*this.rtt_var)
+		this.sendBuffer.getTimer(ackNum) = setTimeout((function() {
+				this.sendBuffer.changeWindowSize(this.packet_size); 
+				this._sendData()
+		}).bind(this) , this.default_timeout  / 1000)
+
+
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
 		let i = this.sendBuffer.changeWindowSize(size)
