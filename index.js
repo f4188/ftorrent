@@ -280,15 +280,15 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		this.lastDupAck = ackNum
 		self = this
-		clearTimeout(this.dupAcktTimer)
-		this.dupAcktTimer = setTimeout(()=>{self.lastDupAck = null}, this.rtt + 2*this.rtt_var)
+		clearTimeout(this.dupAckTimer)
+		this.dupAcktTimer = setTimeout(()=>{self.lastDupAck = null}, (this.rtt + 2*this.rtt_var)/1e3)
 
-		let pack = this.sendBuffer.get(ackNum + 1)
+		let pack = this.sendBuffer.get(lastAck + 1)
 		time = this.timeStamp()
 		pack.timeStamp = time
 		clearTimeout(pack.timer)
 		pack.timer = setTimeout((function() {
-				self.sendBuffer.changeWindowSize(this.packet_size); 
+				self.sendBuffer.changeWindowSize(self.packet_size); 
 				self._sendData()
 		}).bind(this) , this.default_timeout  / 1000)
 		
