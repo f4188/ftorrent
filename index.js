@@ -246,7 +246,7 @@ Socket.prototype._sendData = function() {
 				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
 				self.sendBuffer.changeWindowSize(self.packet_size); 
-				this.packetsInFlight = 0
+				//this.packetsInFlight = 0
 				//self.sendBuffer.maxWindowBytes = self.packet_size
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
