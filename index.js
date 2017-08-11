@@ -225,7 +225,7 @@ Socket.prototype._sendData = function() {
 			let next = this.sendBuffer.getNext() //next = {seq, elem, timer, timestamp}
 			next.timeStamp = this.timeStamp()
 
-			let self, i = this, 1
+			let self = this, i = 1
 			let setTimer = function() {
 				next.timer = setTimeout(function() {
 				self.sendBuffer.maxWindowBytes = self.packet_size
