@@ -225,24 +225,26 @@ Socket.prototype._sendData = function() {
 			let next = this.sendBuffer.getNext() //next = {seq, elem, timer, timestamp}
 			next.timeStamp = this.timeStamp()
 
+			/*
 			let self = this, i = 1
 			let setTimer = function() {
 				next.timer = setTimeout(function() {
-				self.sendBuffer.maxWindowBytes = self.packet_size
+				//self.sendBuffer.maxWindowBytes = self.packet_size
+				this.sendBuffer.changeWindowSize(this.packet_size); 
 				self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				setTimer()
 				} , self.default_timeout  / 1e3 * Math.pow(2, i))
 				//if(i < 3) i++ 
 			}
-			setTimer()
+			setTimer()*/
 
-			/*
+			
 			next.timer = setTimeout(function() {
 				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
-				//this.sendBuffer.changeWindowSize(this.packet_size); 
-				self.sendBuffer.maxWindowBytes = self.packet_size
+				this.sendBuffer.changeWindowSize(this.packet_size); 
+				//self.sendBuffer.maxWindowBytes = self.packet_size
 				self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				//this._sendData()
