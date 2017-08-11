@@ -225,7 +225,7 @@ Socket.prototype._sendData = function() {
 			let next = this.sendBuffer.getNext(), time = this.timeStamp()
 			next.timeStamp = time
 			next.timer = setTimeout((function() {
-				this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
+				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
 				this.sendBuffer.changeWindowSize(this.packet_size); 
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
@@ -275,9 +275,21 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		if(size < this.packet_size) size = this.packet_size
 		//this.ssthresh = size
 		//this.slowStart = 
-		let i = this.sendBuffer.changeWindowSize(size)
+		//let i = this.sendBuffer.changeWindowSize(size)
+		this.sendBuffer.maxWindowBytes = size
+
 		//this.windowSizes.push(this.sendBuffer.maxWindowBytes)
 		let seq =  this.lastRetransmit //ackNum + 1
+		/*
+		let pack = this.sendBuffer.getPack(seq)
+
+		clearTimeout(pack.timer)
+		pack.timer = setTimeout(function() {
+			this.sendBuffer.changeWindowSize(this.packet_size); 
+				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
+				this._sendData()
+			}, this.default_timeout / 1e3)
+			*/
 		this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
 	}
 }
