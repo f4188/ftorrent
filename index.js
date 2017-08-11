@@ -225,16 +225,16 @@ Socket.prototype._sendData = function() {
 			let next = this.sendBuffer.getNext() //next = {seq, elem, timer, timestamp}
 			next.timeStamp = this.timeStamp()
 
-			self = this
+			let self, i = this, 1
 			let setTimer = function() {
 				next.timer = setTimeout(function() {
 				self.sendBuffer.maxWindowBytes = self.packet_size
 				self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				setTimer()
-				} , self.default_timeout  / 1e3)
+				} , self.default_timeout  / 1e3 * Math.pow(2, i))
+				if(i < 3) i++ 
 			}
-
 			setTimer()
 
 			/*
@@ -333,8 +333,8 @@ Socket.prototype._scaledGain = function(packetsAcked) {
 	assert(packetsAcked >= 0)
 	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
-	//let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
-	let windowFactor = (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
+	let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
+	//let windowFactor = (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
 	/*
 	if(this.sendBuffer.maxWindowBytes < this.ssthresh && delay_factor >= 0.5) {
 		this.sendBuffer.maxWindowBytes += this.packet_size * windowFactor
