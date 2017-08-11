@@ -224,13 +224,16 @@ Socket.prototype._sendData = function() {
 		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext(), time = this.timeStamp()
 			next.timeStamp = time
-			next.timer = setTimeout((function() {
+			self = this
+			next.timer = setTimeout(function() {
 				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
-				this.sendBuffer.changeWindowSize(this.packet_size); 
-				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
-				this._sendData()
-			}).bind(this) , this.default_timeout  / 1000)
+				//this.sendBuffer.changeWindowSize(this.packet_size); 
+				self.sendBuffer.maxWindowBytes = self.packet_size
+				this._send(self.makeHeader(ST_DATA, seq, self.recvWindow.ackNum()), next.elem)
+				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
+				//this._sendData()
+			} , this.default_timeout  / 1000)
 
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this._send(header, next.elem)
