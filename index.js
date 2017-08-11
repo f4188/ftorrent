@@ -101,6 +101,7 @@ function Socket(udpSock, port, host) {
 
 	this.ssthresh = DEFAULT_INITIAL_WINDOW_SIZE
 	this.slowStart = false
+	this.packetsInFlight = 0
 
 	//timers
 	this.keepAlive; //syn'er
@@ -221,7 +222,10 @@ Socket.prototype._sendData = function() {
 			this.sendBuffer.insert(null, nextData)	
 		}
 
-		if(this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())  {
+		if(this.sendBuffer.hasNext() && this.packetsInFlight * this.packetSize < this.sendBuffer.maxWindowBytes 
+			&& this.packetsInFlight * this.packet_size < this.sendBuffer.maxRecvWindowBytes) {
+
+			//!this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext() //next = {seq, elem, timer, timestamp}
 			next.timeStamp = this.timeStamp()
 
@@ -243,14 +247,15 @@ Socket.prototype._sendData = function() {
 			next.timer = setTimeout(function() {
 				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
-				self.sendBuffer.changeWindowSize(this.packet_size); 
-				//self.sendBuffer.maxWindowBytes = self.packet_size
+				//self.sendBuffer.changeWindowSize(this.packet_size); 
+				self.sendBuffer.maxWindowBytes = self.packet_size
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				self._sendData()
 			} , self.default_timeout  / 1000)
 
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
+			this.packetsInFlight++
 			this._send(header, next.elem)
 		}
 	}
@@ -271,43 +276,29 @@ Socket.prototype._send = function(header, data) {
 
 Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.sendBuffer.isEmpty()) return
-	//let lastAck = 
+ 
 	let seqNum = this.sendBuffer.seqNum()
-	if(ackNum != this.sendBuffer.ackNum())// && (!this.lastDupAck || ackNum != this.lastDupAck))
+	if(ackNum != this.sendBuffer.ackNum()) {
 		this.dupAck = 0
+		//this.packetsInFlight--
+	}
 	else if (ackNum > this.lastRetransmit - 1 || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
-	//if( ackNum == null || ackNum != this.lastDupAck)
 		this.dupAck++;
 
 	if(this.dupAck == 3 ) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		this.dupAck = 0;
 
-		///////////////////////////////////////////
-
 		this.lastRetransmit = ackNum + 1
-
-		//this.lastDupAck = ackNum
 
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
-		//this.ssthresh = size
-		//this.slowStart = 
-		//let i = this.sendBuffer.changeWindowSize(size)
+
 		this.sendBuffer.maxWindowBytes = size + 3 * this.packet_size
 
-		//this.windowSizes.push(this.sendBuffer.maxWindowBytes)
 		let seq =  this.lastRetransmit //ackNum + 1
-		/*
-		let pack = this.sendBuffer.getPack(seq)
-
-		clearTimeout(pack.timer)
-		pack.timer = setTimeout(function() {
-			this.sendBuffer.changeWindowSize(this.packet_size); 
-				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
-				this._sendData()
-			}, this.default_timeout / 1e3)
-			*/
+		
+		this.packetsInFlight -= 2; // -3 dupAcks + 1 Retransmit 
 		this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
 	}
 }
@@ -395,10 +386,15 @@ Socket.prototype._recv = function(msg) {
 		this.eof_pkt = header.seq_nr;
 	} 
 
+	//if(header.type == ST_STATE) this.packetsInFlight--
+
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
+
+	//if(this.sendBuffer.curWindow() )
 	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
+	this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
 	this._scaledGain(timeStamps.length)
 	
 	this._sendData()
