@@ -297,7 +297,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		let seq =  this.lastRetransmit //ackNum + 1
 		
-		this.packetsInFlight -= 2; // -3 dupAcks + 1 Retransmit 
+		//this.packetsInFlight -= 2; // -3 dupAcks + 1 Retransmit 
 		this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
 	}
 }
@@ -388,10 +388,10 @@ Socket.prototype._recv = function(msg) {
 	//if(header.type == ST_STATE) this.packetsInFlight--
 
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
-	//this._handleDupAck(header.ack_nr)
+	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 
-	//if(this.sendBuffer.curWindow() )
+	//if(this.sendBuffer.curWindow())
 	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
 	this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
 	//this.packetsInFlight = Math.max(this.packetsInFlight, 0)
