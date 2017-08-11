@@ -166,7 +166,7 @@ Socket.prototype.connect = function (port, host) {
 		//process.stdout.clearLine() 
 		process.stdout.cursorTo(0)
 		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Upload: " + this.uploadSpeed * 8 +  " | Reply micro " + ("       " + (this.reply_micro).toPrecision(6)).slice(-8) + " | Base delay: " + (this.reply_micro - this.win_reply_micro.peekMinTime()))	
-		this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + "\n")
+		this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.ackNum() + "\n")
 	})	
 
 	this.connecting = true;
@@ -273,7 +273,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
-		this.ssthresh = size
+		//this.ssthresh = size
 		//this.slowStart = 
 		let i = this.sendBuffer.changeWindowSize(size)
 		//this.windowSizes.push(this.sendBuffer.maxWindowBytes)
