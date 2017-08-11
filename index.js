@@ -230,7 +230,7 @@ Socket.prototype._sendData = function() {
 				//this.slowStart = true
 				//this.sendBuffer.changeWindowSize(this.packet_size); 
 				self.sendBuffer.maxWindowBytes = self.packet_size
-				this._send(self.makeHeader(ST_DATA, seq, self.recvWindow.ackNum()), next.elem)
+				this._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				//this._sendData()
 			} , this.default_timeout  / 1000)
