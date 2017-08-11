@@ -137,6 +137,8 @@ function Socket(udpSock, port, host) {
 	this.win_reply_micro = new TQueue()
 	this.timestamp_difference_microseconds = 250*1e3
 
+	this.lastRetransmit;
+	/*
 	this.lastDupAck = null
 	this.dupAcktTimer
 
@@ -156,7 +158,7 @@ function Socket(udpSock, port, host) {
 		//timeSinceLastPackSent
 		//timeout = 1000/timeSinceLastPackSent
 		setTimeout(self.pacer, timeout)
-	}
+	}*/
 	//this.pacer()
 	/*
 	this.statServer = http.createServer((req,res) => {
@@ -194,8 +196,9 @@ Socket.prototype._sendSyn = function() { //called by connect
 	this.recvConnectID = Crypto.randomBytes(2).readUInt16BE();
 	this.sendConnectID = this.recvConnectID + 1;
 	this.sendBuffer = new SendBuffer(seq_nr, DEFAULT_INITIAL_WINDOW_SIZE, -1, this.packet_size)
+	this.lastRetransmit = seq_nr
 	let header = this.makeHeader(ST_SYN, seq_nr, null)
-
+	//sentSyn = true
 	let i = 3, tTime = this.default_timeout
 	var syn = (function() {
 		this._send(header)
@@ -212,7 +215,9 @@ Socket.prototype._recvSyn = function(header) {
 	this.recvWindow = new RecvWindow(header.seq_nr, -1, DEFAULT_RECV_WINDOW_SIZE, this.packet_size)
 	let seq_nr = Crypto.randomBytes(2).readUInt16BE()
 	this.sendBuffer = new SendBuffer(seq_nr, DEFAULT_INITIAL_WINDOW_SIZE, header.wnd_size, this.packet_size)
+	this.lastRetransmit = seq_nr
 	this.connecting = true;
+	//recvSyn = true
 	this._sendState(seq_nr, this.recvWindow.ackNum()) //synack
 }
 
@@ -266,10 +271,12 @@ Socket.prototype._send = function(header, data) {
 
 Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.sendBuffer.isEmpty()) return
-	let lastAck = this.sendBuffer.ackNum()
-	if(ackNum != lastAck)// && (!this.lastDupAck || ackNum != this.lastDupAck))
+	//let lastAck = 
+	let seqNum = this.sendBuffer.seqNum()
+	if(ackNum != this.sendBuffer.ackNum())// && (!this.lastDupAck || ackNum != this.lastDupAck))
 		this.dupAck = 0
-	else if( ackNum == null || ackNum != this.lastDupAck)
+	else (ackNum > this.lastRetransmit || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
+	//if( ackNum == null || ackNum != this.lastDupAck)
 		this.dupAck++;
 
 	if(this.dupAck == 3) {
@@ -278,11 +285,13 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		///////////////////////////////////////////
 
-		this.lastDupAck = ackNum
+		this.lastRetransmit = ackNum + 1
+
+		//this.lastDupAck = ackNum
+		/*
 		self = this
 		clearTimeout(this.dupAckTimer)
 		this.dupAcktTimer = setTimeout(()=>{self.lastDupAck = null}, (this.rtt + 2*this.rtt_var)/1e3)
-
 		let pack = this.sendBuffer.get(lastAck + 1)
 		time = this.timeStamp()
 		pack.timeStamp = time
@@ -291,7 +300,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 				self.sendBuffer.changeWindowSize(self.packet_size); 
 				self._sendData()
 		}).bind(this) , this.default_timeout  / 1000)
-		
+		*/
 		/////////////////////////////////////////////////////////
 
 		let size = this.sendBuffer.maxWindowBytes / 2
@@ -320,6 +329,13 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	this.timestamp_difference_microseconds = Math.abs(Math.abs(time) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
 	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)	
+}
+
+Socket.prototype._scaledGain = function(packetsAcked) {
+	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
+	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
+	this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * ((packetsAcked * this.sendBuffer.packet_size) / this.sendBuffer.maxWindowBytes)
+	this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
 }
 
 Socket.prototype._recv = function(msg) { 
@@ -360,6 +376,8 @@ Socket.prototype._recv = function(msg) {
 			this._sendState(this.sendBuffer.seqNum(), this.recvWindow.ackNum())
 			}, KEEP_ALIVE_INTERVAL);*/
 		}
+
+		/*
 		var scaledGain = (function() { 
 			this.scaledGainTimer = setTimeout( (function() {
 				let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
@@ -371,6 +389,7 @@ Socket.prototype._recv = function(msg) {
 			}).bind(this) , this.rtt / 1000);
 		}).bind(this)
 		scaledGain() //start scaled gain (for both sides) after sender begins sending data 
+		*/
 	} else if (!this.connected && !this.connecting) { //maybe reset, fin, state or data
 		this._send(this.makeHeader(ST_RESET, null, null))
 		return // may be send reset ??
@@ -383,6 +402,7 @@ Socket.prototype._recv = function(msg) {
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 	this._calcNewTimeout(timeStamps)
+	this._scaledGain(timeStamps.length)
 	
 	this._sendData()
 
