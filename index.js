@@ -125,6 +125,7 @@ function Socket(udpSock, port, host) {
 	
 	this.dupAck = 0;
 	this.lastRetransmit; //initialized in sendSyn and recvSyn
+	this.lastDupAck = null
 
 	this.uploadSpeed = 0
 
@@ -253,7 +254,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	let seqNum = this.sendBuffer.seqNum()
 	if(ackNum != this.sendBuffer.ackNum())// && (!this.lastDupAck || ackNum != this.lastDupAck))
 		this.dupAck = 0
-	else if (ackNum > this.lastRetransmit || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
+	else if (ackNum > this.lastRetransmit - 1 || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
 	//if( ackNum == null || ackNum != this.lastDupAck)
 		this.dupAck++;
 
@@ -265,7 +266,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		this.lastRetransmit = ackNum + 1
 
-		//this.lastDupAck = ackNum
+		this.lastDupAck = ackNum
 		/*
 		self = this
 		clearTimeout(this.dupAckTimer)
