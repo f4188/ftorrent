@@ -233,7 +233,7 @@ Socket.prototype._sendData = function() {
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				setTimer()
 				} , self.default_timeout  / 1e3 * Math.pow(2, i))
-				if(i < 3) i++ 
+				//if(i < 3) i++ 
 			}
 			setTimer()
 
