@@ -311,9 +311,9 @@ Socket.prototype._scaledGain = function(packetsAcked) {
 		this.sendBuffer.maxWindowBytes += this.packet_size * windowFactor
 	} else if (delay_factor < 0.1) {
 		this.ssthresh = this.sendBuffer.maxWindowBytes
-	} else {
-		this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * windowFactor
-	}*/
+	} else {*/
+	this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * windowFactor
+	
 
 	this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
 }
