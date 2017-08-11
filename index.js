@@ -99,6 +99,9 @@ function Socket(udpSock, port, host) {
 	this.recvWindow;
 	this.packet_size = INITIAL_PACKET_SIZE
 
+	this.ssthresh = DEFAULT_INITIAL_WINDOW_SIZE
+	this.slowStart = false
+
 	//timers
 	this.keepAlive; //syn'er
 	//this.alive //if recv data or keepalive message stay connected otherwise kill connection
@@ -129,15 +132,14 @@ function Socket(udpSock, port, host) {
 
 	this.uploadSpeed = 0
 
-	this.default_timeout = MIN_DEFAULT_TIMEOUT
-	this.rtt = 500*1e3;
-	this.rtt_var = 100*1e3;
-	
 	this.sendConnectID; 
 	this.recvConnectID; 
 	
-	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) } //not really a microsecond timestamp
+	this.default_timeout = MIN_DEFAULT_TIMEOUT
+	this.rtt = 500*1e3;
+	this.rtt_var = 100*1e3;
 
+	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) } //not really a microsecond timestamp
 	this.win_reply_micro = new TQueue()
 	this.reply_micro = 0 //zero in spec
 	this.timestamp_difference_microseconds = 250*1e3 //maybe zero?
@@ -223,8 +225,9 @@ Socket.prototype._sendData = function() {
 			let next = this.sendBuffer.getNext(), time = this.timeStamp()
 			next.timeStamp = time
 			next.timer = setTimeout((function() {
+				this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
+				this.slowStart = true
 				this.sendBuffer.changeWindowSize(this.packet_size); 
-
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
@@ -258,7 +261,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	//if( ackNum == null || ackNum != this.lastDupAck)
 		this.dupAck++;
 
-	if(this.dupAck == 3) {
+	if(this.dupAck == 3 ) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		this.dupAck = 0;
 
@@ -284,6 +287,8 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
+		this.ssthresh = size
+		//this.slowStart = 
 		let i = this.sendBuffer.changeWindowSize(size)
 		//this.windowSizes.push(this.sendBuffer.maxWindowBytes)
 		let seq =  this.lastRetransmit //ackNum + 1
@@ -314,7 +319,16 @@ Socket.prototype._scaledGain = function(packetsAcked) {
 	assert(packetsAcked >= 0)
 	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
-	this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
+	let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
+
+	if(this.sendBuffer.maxWindowBytes < this.ssthresh && delay_factor >= 0.1) {
+		this.sendBuffer.maxWindowBytes += this.packet_size * windowFactor
+	} else if (delay_factor < 0.1) {
+		this.ssthresh = this.sendBuffer.maxWindowBytes
+	} else {
+		this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * windowFactor
+	}
+
 	this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
 }
 
