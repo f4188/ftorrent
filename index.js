@@ -248,7 +248,7 @@ Socket.prototype._sendData = function() {
 				self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				//this._sendData()
-			} , this.default_timeout  / 1000)*/
+			} , this.default_timeout  / 1000)
 
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this._send(header, next.elem)
