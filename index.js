@@ -226,7 +226,7 @@ Socket.prototype._sendData = function() {
 			next.timeStamp = time
 			next.timer = setTimeout((function() {
 				this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
-				this.slowStart = true
+				//this.slowStart = true
 				this.sendBuffer.changeWindowSize(this.packet_size); 
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this._sendData()
@@ -269,21 +269,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		this.lastRetransmit = ackNum + 1
 
-		this.lastDupAck = ackNum
-		/*
-		self = this
-		clearTimeout(this.dupAckTimer)
-		this.dupAcktTimer = setTimeout(()=>{self.lastDupAck = null}, (this.rtt + 2*this.rtt_var)/1e3)
-		let pack = this.sendBuffer.get(lastAck + 1)
-		time = this.timeStamp()
-		pack.timeStamp = time
-		clearTimeout(pack.timer)  //need to reset all timers in window
-		pack.timer = setTimeout((function() {
-				self.sendBuffer.changeWindowSize(self.packet_size); 
-				self._sendData()
-		}).bind(this) , this.default_timeout  / 1000)
-		*/
-		/////////////////////////////////////////////////////////
+		//this.lastDupAck = ackNum
 
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
@@ -320,14 +306,14 @@ Socket.prototype._scaledGain = function(packetsAcked) {
 	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
 	let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
-
-	if(this.sendBuffer.maxWindowBytes < this.ssthresh && delay_factor >= 0.1) {
+	/*
+	if(this.sendBuffer.maxWindowBytes < this.ssthresh && delay_factor >= 0.5) {
 		this.sendBuffer.maxWindowBytes += this.packet_size * windowFactor
 	} else if (delay_factor < 0.1) {
 		this.ssthresh = this.sendBuffer.maxWindowBytes
 	} else {
 		this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * windowFactor
-	}
+	}*/
 
 	this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
 }
