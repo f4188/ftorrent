@@ -276,7 +276,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		//this.ssthresh = size
 		//this.slowStart = 
 		//let i = this.sendBuffer.changeWindowSize(size)
-		this.sendBuffer.maxWindowBytes = size
+		this.sendBuffer.maxWindowBytes = size + 3 * this.packet_size
 
 		//this.windowSizes.push(this.sendBuffer.maxWindowBytes)
 		let seq =  this.lastRetransmit //ackNum + 1
