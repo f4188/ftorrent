@@ -335,7 +335,7 @@ Socket.prototype._scaledGain = function(packetsAcked) {
 	assert(packetsAcked >= 0)
 	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
-	this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * ((packetsAcked * this.sendBuffer.packet_size) / this.sendBuffer.maxWindowBytes)
+	this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
 	this.sendBuffer.maxWindowBytes = Math.max(this.packet_size, this.sendBuffer.maxWindowBytes)
 }
 
