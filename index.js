@@ -222,10 +222,8 @@ Socket.prototype._sendData = function() {
 			this.sendBuffer.insert(null, nextData)	
 		}
 
-		if(this.sendBuffer.hasNext() && this.packetsInFlight * this.packet_size < this.sendBuffer.maxWindowBytes 
-			&& this.packetsInFlight * this.packet_size < this.sendBuffer.maxRecvWindowBytes) {
-
-			//!this.sendBuffer.isWindowFull())  {
+		if(this.sendBuffer.hasNext() &&  /*this.packetsInFlight * this.packet_size < this.sendBuffer.maxWindowBytes 
+			&& this.packetsInFlight * this.packet_size < this.sendBuffer.maxRecvWindowBytes) {*/ !this.sendBuffer.isWindowFull())  {
 			let next = this.sendBuffer.getNext() //next = {seq, elem, timer, timestamp}
 			next.timeStamp = this.timeStamp()
 
@@ -247,8 +245,9 @@ Socket.prototype._sendData = function() {
 			next.timer = setTimeout(function() {
 				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
-				//self.sendBuffer.changeWindowSize(this.packet_size); 
-				self.sendBuffer.maxWindowBytes = self.packet_size
+				self.sendBuffer.changeWindowSize(this.packet_size); 
+				this.packetsInFlight = 0
+				//self.sendBuffer.maxWindowBytes = self.packet_size
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + self.default_timeout)
 				self._sendData()
@@ -389,12 +388,13 @@ Socket.prototype._recv = function(msg) {
 	//if(header.type == ST_STATE) this.packetsInFlight--
 
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
-	this._handleDupAck(header.ack_nr)
+	//this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 
 	//if(this.sendBuffer.curWindow() )
 	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
 	this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
+	//this.packetsInFlight = Math.max(this.packetsInFlight, 0)
 	this._scaledGain(timeStamps.length)
 	
 	this._sendData()
