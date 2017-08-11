@@ -332,6 +332,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 }
 
 Socket.prototype._scaledGain = function(packetsAcked) {
+	assert(packetsAcked >= 0)
 	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
 	this.sendBuffer.maxWindowBytes +=  MAX_CWND_INCREASE_PACKETS_PER_RTT * delay_factor * ((packetsAcked * this.sendBuffer.packet_size) / this.sendBuffer.maxWindowBytes)
@@ -401,7 +402,7 @@ Socket.prototype._recv = function(msg) {
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
-	this._calcNewTimeout(timeStamps)
+	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
 	this._scaledGain(timeStamps.length)
 	
 	this._sendData()
