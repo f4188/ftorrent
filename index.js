@@ -222,7 +222,7 @@ Socket.prototype._sendData = function() {
 			this.sendBuffer.insert(null, nextData)	
 		}
 
-		if(this.sendBuffer.hasNext() && this.packetsInFlight * this.packetSize < this.sendBuffer.maxWindowBytes 
+		if(this.sendBuffer.hasNext() && this.packetsInFlight * this.packet_size < this.sendBuffer.maxWindowBytes 
 			&& this.packetsInFlight * this.packet_size < this.sendBuffer.maxRecvWindowBytes) {
 
 			//!this.sendBuffer.isWindowFull())  {
