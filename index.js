@@ -254,7 +254,7 @@ Socket.prototype._sendData = function() {
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
-				this.file2.write(this.timeStamp()/1e3 + " " + this.SendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16))
+				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16))
 
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
@@ -293,7 +293,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.dupAck == 3 ) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		//this.dupAck = 0;
-		this.file2.write(this.timeStamp()/1e3 + " " + this.SendBuffer.ackNum() + " " + "DupAck")
+		this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "DupAck")
 
 		this.lastRetransmit = ackNum + 1
 
