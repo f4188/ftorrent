@@ -254,7 +254,7 @@ Socket.prototype._sendData = function() {
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
-				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16))
+				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16) + "\n")
 
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
@@ -282,7 +282,7 @@ Socket.prototype._send = function(header, data) {
 Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.sendBuffer.isEmpty()) return
  
-	let seqNum = this.sendBuffer.seqNum()
+	//let seqNum = this.sendBuffer.seqNum()
 	if(ackNum != this.sendBuffer.ackNum()) {
 		this.dupAck = 0
 		//this.packetsInFlight--
@@ -293,14 +293,14 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.dupAck == 3 ) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
 		//this.dupAck = 0;
-		this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "DupAck")
+		this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "DupAck" + "\n")
 
-		this.lastRetransmit = ackNum + 1
+		//this.lastRetransmit = ackNum + 1
 
 		let size = this.sendBuffer.maxWindowBytes / 2
 		if(size < this.packet_size) size = this.packet_size
 
-		this.sendBuffer.maxWindowBytes = size + 3 * this.packet_size
+		this.sendBuffer.maxWindowBytes = size //+ 3 * this.packet_size
 
 		//let seq =  this.lastRetransmit //ackNum + 1
 		let seq = ackNum + 1
@@ -405,9 +405,9 @@ Socket.prototype._recv = function(msg) {
 
 	//if(this.sendBuffer.curWindow())
 	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
-	this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
+	//this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
 	//this.packetsInFlight = Math.max(this.packetsInFlight, 0)
-	this._scaledGain(timeStamps.length)
+	this._scaledGain(timeStamps.length) //arg is outstanding packets acknowledged
 	
 	this._sendData()
 
