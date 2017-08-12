@@ -24,7 +24,7 @@ const ST_SYN  = 4
 DEFAULT_WIN_UDP_BUFFER = 8000
 
 INITIAL_PACKET_SIZE = 500
-CCONTROL_TARGET = 50000
+CCONTROL_TARGET = 100000
 MAX_CWND_INCREASE_PACKETS_PER_RTT = INITIAL_PACKET_SIZE
 DEFAULT_INITIAL_WINDOW_SIZE = 1500 * 2
 DEFAULT_RECV_WINDOW_SIZE = 100000 // 100kB
@@ -326,7 +326,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	this.reply_micro = header.timestamp_difference_microseconds
 	this.timestamp_difference_microseconds = Math.abs(Math.abs(time) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
-	this.win_reply_micro.removeByElem(time/1e3 - 20*1e3)	
+	this.win_reply_micro.removeByElem(time/1e3 - 120*1e3)	
 }
 
 Socket.prototype._scaledGain = function(packetsAcked) {
