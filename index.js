@@ -12,7 +12,7 @@ RecvWindow = require('./lib/WindowBuffer.js').RecvWindow
 speedometer = require('speedometer')
 speed = speedometer(4)
 speed3 = speedometer(4)
-speed2 = speedometer(60)
+speed2 = speedometer(360)
 
 const VERSION = 1
 const ST_DATA = 0 //Data
