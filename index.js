@@ -167,7 +167,6 @@ Socket.prototype.connect = function (port, host) {
 		//process.stdout.clearLine() 
 		process.stdout.cursorTo(0)
 		process.stdout.write("Max window size " + (this.sendBuffer.maxWindowBytes).toPrecision(7) + " | Current window size: " + (this.sendBuffer.curWindow()).toPrecision(5) + " | Upload: " + this.uploadSpeed * 8 +  " | Reply micro " + ("       " + (this.reply_micro).toPrecision(6)).slice(-8) + " | Base delay: " + (this.reply_micro - this.win_reply_micro.peekMinTime()))	
-		this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
 	})	
 
 	this.connecting = true;
@@ -250,6 +249,9 @@ Socket.prototype._sendData = function() {
 				//self.sendBuffer.maxWindowBytes = self.packet_size
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
+				this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
+
+
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
 
@@ -390,6 +392,8 @@ Socket.prototype._recv = function(msg) {
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
+
+	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
 
 	//if(this.sendBuffer.curWindow())
 	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
