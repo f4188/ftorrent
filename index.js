@@ -161,6 +161,9 @@ Socket.prototype.remoteAddress = function () { return {'port' : this.port, 'host
 Socket.prototype.connect = function (port, host) {
 	this.port = port;
 	this.host = host;	
+
+	this.inter = setInterval(function() {this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
+}.bind(this), 50)
 	this.udpSock.on('message', (msg, rinfo) => {
 		if(getHeaderBuf(msg).connection_id == this.recvConnectID) 
 			this._recv(msg);
@@ -283,12 +286,12 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck = 0
 		//this.packetsInFlight--
 	}
-	else if (ackNum > this.lastRetransmit - 1 || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
+	else //if (ackNum > this.lastRetransmit - 1 || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
 		this.dupAck++;
 
 	if(this.dupAck == 3 ) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
-		this.dupAck = 0;
+		//this.dupAck = 0;
 
 		this.lastRetransmit = ackNum + 1
 
@@ -297,7 +300,8 @@ Socket.prototype._handleDupAck = function (ackNum) {
 
 		this.sendBuffer.maxWindowBytes = size + 3 * this.packet_size
 
-		let seq =  this.lastRetransmit //ackNum + 1
+		//let seq =  this.lastRetransmit //ackNum + 1
+		let seq = ackNum + 1
 		
 		//this.packetsInFlight -= 2; // -3 dupAcks + 1 Retransmit 
 		this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
@@ -390,8 +394,10 @@ Socket.prototype._recv = function(msg) {
 	//if(header.type == ST_STATE) this.packetsInFlight--
 
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
+	let dupAck = this.dupAck
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
+	timeStamps = timeStamps.slice(dupAck)
 
 	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
 
