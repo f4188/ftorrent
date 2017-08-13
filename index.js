@@ -257,7 +257,7 @@ Socket.prototype._sendData = function() {
 				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16) + " " + this.default_timeout + "\n" )
 
 				this._sendData()
-			}).bind(this) , 500000  / 1000)
+			}).bind(this) , this.default_timeout  / 1000)
 
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this.packetsInFlight++
@@ -399,15 +399,17 @@ Socket.prototype._recv = function(msg) {
 	let dupAck = this.dupAck
 	this._handleDupAck(header.ack_nr)
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
-	timeStamps = timeStamps.slice(dupAck)
+	let outstandingPackets = timeStamps.length
+	//timeStamps = timeStamps.slice(dupAck)
 
 	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + " " + this.rtt + "\n")
 
 	//if(this.sendBuffer.curWindow())
-	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
+	if(dupAck == 0)
+		this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
 	//this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
 	//this.packetsInFlight = Math.max(this.packetsInFlight, 0)
-	this._scaledGain(timeStamps.length) //arg is outstanding packets acknowledged
+	this._scaledGain(outstandingPackets) //arg is outstanding packets acknowledged
 	
 	this._sendData()
 
