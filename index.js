@@ -131,6 +131,7 @@ function Socket(udpSock, port, host) {
 	this.dupAck = 0;
 	this.lastRetransmit; //initialized in sendSyn and recvSyn
 	this.lastDupAck = null
+	this.ssthresh = this.packet_size
 
 	this.uploadSpeed = 0
 
@@ -250,6 +251,7 @@ Socket.prototype._sendData = function() {
 			next.timer = setTimeout((function() {
 				//this.ssthresh = Math.max(this.sendBuffer.maxWindowBytes / 2, this.packet_size)
 				//this.slowStart = true
+				this.ssthresh = this.sendBuffer.maxWindowBytes / 2
 				this.sendBuffer.changeWindowSize(this.packet_size); 
 				//this.packetsInFlight = 0
 				//self.sendBuffer.maxWindowBytes = self.packet_size
@@ -286,23 +288,25 @@ Socket.prototype._handleDupAck = function (ackNum) {
 	if(this.sendBuffer.isEmpty()) return
  
 	//let seqNum = this.sendBuffer.seqNum()
-	if(ackNum != this.sendBuffer.ackNum()) {
+	if(ackNum != this.sendBuffer.ackNum()) { 
 		this.dupAck = 0
-		//this.packetsInFlight--
+		//Math.abs(this.dupAck - (ackNum - this.SendBuffer.ackNum()), 0)
 	}
-	else //if (ackNum > this.lastRetransmit - 1 || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
+
+	else {//if (ackNum > this.lastRetransmit - 1 || (seqNum < ackNum && ackNum >=0 && ackNum <= seqNum)) //wraparound
 		this.dupAck++;
+	}
 
 	if(this.dupAck == 3 ) {
-		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum)
+		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum + "    ")
 		//this.dupAck = 0;
 		this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "DupAck" + "\n")
 
 		//this.lastRetransmit = ackNum + 1
 
-		let size = this.sendBuffer.maxWindowBytes / 2
-		if(size < this.packet_size) size = this.packet_size
-
+		//let size = this.sendBuffer.maxWindowBytes / 2
+		//if(size < this.packet_size) size = this.packet_size
+		this.ssthresh = this.sendBuffer.maxWindowBytes / 2
 		this.sendBuffer.changeWindowSize(this.packet_size)
 		this._sendData()
 		//this.sendBuffer.maxWindowBytes = size //+ 3 * this.packet_size
@@ -334,11 +338,15 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	this.win_reply_micro.removeElemLess(time/1e3 - 20*1e3)	
 }
 
-Socket.prototype._scaledGain = function(packetsAcked) {
+Socket.prototype._scaledGain = function(packetsAcked, bytes) {
 	assert(packetsAcked >= 0)
 	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinValue())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
-	let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
+	//if(packetsAcked > )
+	bytes = Math.min(bytes, this.ssthresh)
+
+	//let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
+	let windowFactor = ((bytes) / this.sendBuffer.maxWindowBytes)
 	//let windowFactor = (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
 	/*
 	if(this.sendBuffer.maxWindowBytes < this.ssthresh && delay_factor >= 0.5) {
@@ -398,23 +406,20 @@ Socket.prototype._recv = function(msg) {
 		this.eof_pkt = header.seq_nr;
 	} 
 
-	//if(header.type == ST_STATE) this.packetsInFlight--
-
 	this.sendBuffer.maxRecvWindowBytes = header.wnd_size
+
 	let dupAck = this.dupAck
 	this._handleDupAck(header.ack_nr)
-	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
-	let outstandingPackets = timeStamps.length
-	//timeStamps = timeStamps.slice(dupAck)
+
+	let [timeStamps, outstandingPackets, bytes] = this.sendBuffer.removeUpto(header.ack_nr)
 
 	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + " " + this.rtt + "\n")
 
-	//if(this.sendBuffer.curWindow())
 	if(dupAck == 0)
 		this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
-	//this.packetsInFlight -= timeStamps.length //packs acknowledged, reduce packsinflight, if dup Ack do nothing until 3rd dup Ack then reduce by 3
-	//this.packetsInFlight = Math.max(this.packetsInFlight, 0)
-	this._scaledGain(outstandingPackets) //arg is outstanding packets acknowledged
+	
+	outstandingPackets = outstandingPackets //- (dupAcks - this.dupAcks)
+	this._scaledGain(outstandingPackets, bytes) //arg is outstanding packets acknowledged
 	
 	this._sendData()
 
