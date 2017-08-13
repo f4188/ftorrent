@@ -163,7 +163,7 @@ Socket.prototype.connect = function (port, host) {
 	this.port = port;
 	this.host = host;	
 
-	this.inter = setInterval(function() {this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
+	this.inter = setInterval(function() {this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + " " + this.rtt +"\n")
 }.bind(this), 50)
 	this.udpSock.on('message', (msg, rinfo) => {
 		if(getHeaderBuf(msg).connection_id == this.recvConnectID) 
@@ -401,7 +401,7 @@ Socket.prototype._recv = function(msg) {
 	let timeStamps = this.sendBuffer.removeUpto(header.ack_nr)
 	timeStamps = timeStamps.slice(dupAck)
 
-	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
+	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + " " + this.rtt + "\n")
 
 	//if(this.sendBuffer.curWindow())
 	this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
