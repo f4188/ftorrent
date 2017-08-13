@@ -5,7 +5,7 @@ Crypto = require('crypto')
 Util = require('util')
 EventEmitter = require('events').EventEmitter
 
-TQueue = require('./lib/tqueue.js')
+Heap = require('./lib/Heap.js')
 SendBuffer = require('./lib/WindowBuffer.js').SendBuffer
 RecvWindow = require('./lib/WindowBuffer.js').RecvWindow
 
@@ -69,7 +69,7 @@ Server.prototype.listen = function(port, connectListener) {
 			this.conSockets[id].total += data.length; 
 			//process.stdout.clearLine() 
 			process.stdout.cursorTo(0)
-			process.stdout.write("Total: " +  (this.conSockets[id].total / 1000).toPrecision(8) + " KB | DR: " + (speed(data.length)*8 / 1000) + " Kb/s (2 sec avg) | DR: " + (speed2(data.length)*8/1000).toPrecision(5) + " Kb/s (1 min avg) | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7) + " | Base Delay: " + (this.conSockets[id].reply_micro - this.conSockets[id].win_reply_micro.peekMinTime()));
+			process.stdout.write("Total: " +  (this.conSockets[id].total / 1000).toPrecision(8) + " KB | DR: " + (speed(data.length)*8 / 1000) + " Kb/s (2 sec avg) | DR: " + (speed2(data.length)*8/1000).toPrecision(5) + " Kb/s (1 min avg) | Reply micro: " + (this.conSockets[id].reply_micro).toPrecision(7) + " | Base Delay: " + (this.conSockets[id].reply_micro - this.conSockets[id].win_reply_micro.peekMinValue()) + "       ");
 		})
 		this.emit('connection',this.conSockets[id])
 		this.conSockets[id]._recv(msg)	
@@ -141,7 +141,7 @@ function Socket(udpSock, port, host) {
 	this.rtt_var = 100*1e3;
 
 	this.timeStamp = function () { return (Date.now() * 1e3 )  % Math.pow(2,32) } //not really a microsecond timestamp
-	this.win_reply_micro = new TQueue()
+	this.win_reply_micro = new Heap()
 	this.reply_micro = 0 //zero in spec
 	this.timestamp_difference_microseconds = 250*1e3 //maybe zero?
 
@@ -217,7 +217,8 @@ Socket.prototype._sendData = function() {
 		|| (this.end && this.dataBuffer.length)))
 		|| (this.sendBuffer.hasNext() && !this.sendBuffer.isWindowFull())) {
 
-		//sendBuffer.putData(dataBuffer)
+		//this should happen in sendBuffer 
+		//sendBuffer should have a packetbuffer and a databuffer
 		if(!this.sendBuffer.isBufferFull() && (this.dataBuffer.length > this.packet_size 
 			|| (this.end && this.dataBuffer.length))) {	
 			let nextData = this.dataBuffer.slice(0,this.packet_size)
@@ -333,7 +334,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 
 Socket.prototype._scaledGain = function(packetsAcked) {
 	assert(packetsAcked >= 0)
-	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinTime())
+	let base_delay = Math.abs(this.reply_micro - this.win_reply_micro.peekMinValue())
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
 	let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
 	//let windowFactor = (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
@@ -367,7 +368,7 @@ Socket.prototype._recv = function(msg) {
 	//can be half open ??
 	var reset = function() {
 		this.connected = this.connecting = this.recvFin = this.end = false; this.eof_pkt = null
-		self = this; clearTimeout(self.keepAlive); clearTimeout(self.scaledGainTimer); clearTimeout(self.synTimer)
+		self = this; clearTimeout(self.keepAlive); clearTimeout(self.synTimer)
 	}
 	if(header.type == ST_RESET) {
 		return reset()
