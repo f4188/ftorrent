@@ -254,7 +254,7 @@ Socket.prototype._sendData = function() {
 				//self._send(self.makeHeader(ST_DATA, next.seq % Math.pow(2,16), self.recvWindow.ackNum()), next.elem)
 				process.stdout.write(" | Timeout: " + next.seq + " | default_timeout:  " + this.default_timeout)
 				this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + "\n")
-				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16) + "\n")
+				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16) + " " + this.default_timeout + "\n" )
 
 				this._sendData()
 			}).bind(this) , this.default_timeout  / 1000)
