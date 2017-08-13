@@ -326,7 +326,7 @@ Socket.prototype._calcNewTimeout = function(timeStamps) {
 		let delta = this.rtt - packet_rtt
 		this.rtt_var += (Math.abs(delta) - this.rtt_var)/4
 		this.rtt += (packet_rtt - this.rtt) / 8
-		this.default_timeout = Math.max(this.rtt + this.rtt_var * 4, MIN_DEFAULT_TIMEOUT)
+		this.deault_timeout = Math.max(this.rtt + this.rtt_var * 4, MIN_DEFAULT_TIMEOUT)
 	}).bind(this))
 }
 
@@ -335,7 +335,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	this.reply_micro = header.timestamp_difference_microseconds
 	this.timestamp_difference_microseconds = Math.abs(Math.abs(time) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
-	this.win_reply_micro.removeElemLess(time/1e3 - 20*1e3)	
+	this.win_reply_micro.removeElemLess(time/1e3 - 120*1e3)	
 }
 
 Socket.prototype._scaledGain = function(packetsAcked, bytes) {
@@ -344,7 +344,7 @@ Socket.prototype._scaledGain = function(packetsAcked, bytes) {
 	let delay_factor = (CCONTROL_TARGET - base_delay) / CCONTROL_TARGET;
 	//if(packetsAcked > )
 	bytes = Math.min(bytes, this.ssthresh)
-	bytes = this.packet_size
+	//bytes = this.packet_size
 	//let windowFactor = ((packetsAcked * this.sendBuffer.packetSize) / this.sendBuffer.maxWindowBytes)
 	let windowFactor = ((bytes) / this.sendBuffer.maxWindowBytes)
 	//let windowFactor = (this.sendBuffer.curWindow() / this.sendBuffer.maxWindowBytes)
