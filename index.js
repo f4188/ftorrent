@@ -328,7 +328,7 @@ Socket.prototype._updateWinReplyMicro = function(header) {
 	this.reply_micro = header.timestamp_difference_microseconds
 	this.timestamp_difference_microseconds = Math.abs(Math.abs(time) - Math.abs(header.timestamp_microseconds) % Math.pow(2,32))
 	this.win_reply_micro.insert(Math.abs(this.reply_micro),time/1e3)
-	this.win_reply_micro.removeByElem(time/1e3 - 120*1e3)	
+	this.win_reply_micro.removeElemLess(time/1e3 - 120*1e3)	
 }
 
 Socket.prototype._scaledGain = function(packetsAcked) {
