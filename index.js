@@ -303,11 +303,12 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.sendBuffer.changeWindowSize(this.packet_size)
 		this.sendBuffer.maxWindowBytes = size //+ 3 * this.packet_size
 
+		this._sendData()
 		//let seq =  this.lastRetransmit //ackNum + 1
-		let seq = ackNum + 1
+		//let seq = ackNum + 1
 		
 		//this.packetsInFlight -= 2; // -3 dupAcks + 1 Retransmit 
-		this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
+		//this._send(this.makeHeader(ST_DATA, seq, this.recvWindow.ackNum()), this.sendBuffer.get(seq))
 	}
 }
 
