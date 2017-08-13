@@ -420,7 +420,7 @@ Socket.prototype._recv = function(msg) {
 		this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
 	
 	//outstandingPackets = outstandingPackets //- (dupAcks - this.dupAcks)
-	if(dupAck > 0)
+	if(dupAck == 0)
 		this._scaledGain(packsAcked, bytesAcked) //arg is outstanding packets acknowledged
 	
 	this._sendData()
