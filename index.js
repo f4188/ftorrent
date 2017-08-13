@@ -257,7 +257,7 @@ Socket.prototype._sendData = function() {
 				this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "Timeout: " + next.seq % Math.pow(2,16) + " " + this.default_timeout + "\n" )
 
 				this._sendData()
-			}).bind(this) , this.default_timeout  / 1000)
+			}).bind(this) , 500000  / 1000)
 
 			let header = this.makeHeader(ST_DATA, next.seq % Math.pow(2,16), this.recvWindow.ackNum())
 			this.packetsInFlight++
