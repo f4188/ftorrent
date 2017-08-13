@@ -5,7 +5,7 @@ Crypto = require('crypto')
 Util = require('util')
 EventEmitter = require('events').EventEmitter
 
-Heap = require('./lib/Heap.js')
+Heap = require('./lib/heap.js')
 SendBuffer = require('./lib/WindowBuffer.js').SendBuffer
 RecvWindow = require('./lib/WindowBuffer.js').RecvWindow
 
@@ -117,9 +117,10 @@ function Socket(udpSock, port, host) {
 		'SYN_RECV': 2, //connecting
 		'CONNECTED': 3, //connected
 		'FIN_RECV': 4,  //recvFin
-		'FIN_SENT' : 5,
-		'DISCONNECTED' : 6
+		'FIN_SENT' : 5, //end but only after databuffer is empty
+		'DISCONNECTED' : 6 //not connected
 	}
+
 	this.connected = false;
 	this.connecting = false; //send/recv syn
 	this.disconnecting = false;
@@ -265,6 +266,7 @@ Socket.prototype._sendData = function() {
 			this._send(header, next.elem)
 		}
 	}
+
 	if(this.dataBuffer.length == 0) this.emit('dataBuffer:empty')
 }
 
