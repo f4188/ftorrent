@@ -99,7 +99,7 @@ function Socket(udpSock, port, host) {
 	this.recvWindow;
 	this.packet_size = INITIAL_PACKET_SIZE
 
-	this.ssthresh = DEFAULT_INITIAL_WINDOW_SIZE
+	this.ssthresh = DEFAULT_INITIAL_WINDOW_SIZE * 100
 	this.slowStart = false
 	this.packetsInFlight = 0
 
