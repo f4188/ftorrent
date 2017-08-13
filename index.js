@@ -411,15 +411,15 @@ Socket.prototype._recv = function(msg) {
 	let dupAck = this.dupAck
 	this._handleDupAck(header.ack_nr)
 
-	let [timeStamps, outstandingPackets, bytes] = this.sendBuffer.removeUpto(header.ack_nr)
+	let [timeStamps, packsAcked, bytesAcked] = this.sendBuffer.removeUpto(header.ack_nr)
 
 	this.file.write((this.timeStamp()/1e3) + " " + this.sendBuffer.curWindow() + " " + this.sendBuffer.maxWindowBytes + " " + this.sendBuffer.ackNum() + " " + this.rtt + "\n")
 
 	if(dupAck == 0)
 		this._calcNewTimeout(timeStamps) //updates rtt with timestamps of recv packs
 	
-	outstandingPackets = outstandingPackets //- (dupAcks - this.dupAcks)
-	this._scaledGain(outstandingPackets, bytes) //arg is outstanding packets acknowledged
+	//outstandingPackets = outstandingPackets //- (dupAcks - this.dupAcks)
+	this._scaledGain(packsAcked, bytesAcked) //arg is outstanding packets acknowledged
 	
 	this._sendData()
 
