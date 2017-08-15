@@ -275,7 +275,7 @@ Socket.prototype._handleDupAck = function (ackNum) {
 		this.dupAck++;
 	}
 
-	if(this.dupAck == 5 ) {
+	if(this.dupAck == 3 ) {
 		process.stdout.write(" | Dup Ack: Expected " + (this.sendBuffer.ackNum() + 1) + " got " + ackNum + "    ")
 		this.file2.write(this.timeStamp()/1e3 + " " + this.sendBuffer.ackNum() + " " + "DupAck" + "\n")
 
