@@ -1,9 +1,12 @@
 
 net = require('net')
 
+//currently connected peers
 function Swarm() { //ip list
 
 	this.peers = []
+	//this.badPeers 
+	//
 
 	//lists updated by listeners on events emitted by peers
 	this.amUnchoked = [] 
@@ -18,27 +21,77 @@ function Swarm() { //ip list
 	self = this
 
 	this.TCPserver.on('connection', (function(sock) {
-		let peer = new Peer(sock, false) //peer owns socket
+		let peer = new Peer(sock, file, false) //peer owns socket
 		self.setListeners(peer)
-		
+		peer.on('connected', )
+		sock.resume()
 	}))
 }
 
 Swarm.prototype.connectPeer = function (addr) {
-	sock = net.createSocket()
+
+	opts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
+	sock = net.createConnection()
 	sock.connect(addr.port, addr.host)
+
 	return new Promise(resolve, reject) {
-			//reject on timeout
+
+		let timeout = setTimeout(()=> {
+			reject("peer timeout")
+		}, this.defaultTimeout)
+
 		sock.on('connected', ()=> {	
-			let peer = new Peer(sock, true)	
+			let peer = new Peer(sock, file, true) //init is true - send handshake
 			self.setListeners(peer)
-			this.on('connected', () => { resolve(peer) })
+			peer.on('connected', () => { //after recieving handshake
+				clearTimeout(timeout)
+				resolve(peer) 
+			})
+			sock.resume()
 		})
 	}
 }
 
 Swarm.prototype.connectManyPeers = function (addrs) {
-	this.peers.concat( addrs.map((addr) => connectPeer(addr) ) )
+	return addrs.map( (addr) => connectPeer(addr) )
+}
+
+Swarm.prototype.addPeers = function (addrs) {
+	connectManyPeers.forEach( async (promise) => {
+		try {
+			peer = await promise
+			this.peers.push(peer)
+		}
+		// do something
+		//if bad peer discard
+		//
+	})
+}
+
+Swarm.prototype.newPeers = function () {
+
+}
+
+Swarm.prototype.piecesByFreq = function () {
+
+	let freq = {}
+
+	this.peers.reduce((peer, freq) => {
+		peer.pieces.forEach(piece => {
+			if(freq[piece])
+				freq[piece]++
+			else 
+				freq[piece] = 1
+		})
+		return freq
+	}, freq)
+
+	Object.keys(freq).forEach(key => {
+		freq[key] /= peers.length
+	})
+
+	return freq
+
 }
 
 Swarm.prototype.setListeners = function (peer) { //called after tcp or uTP connection established
@@ -77,37 +130,35 @@ Swarm.prototype.setListeners = function (peer) { //called after tcp or uTP conne
 /*
 downloader = Downloader()
 
+client = startUpClient()
+client.addTorrent(path to torrent file/uri or magnet uri in string form) 
 
 */
 
+//
 function Downloader() {
 
-	this.swarm //= new Swarm()
 	this.pieces = []
-	this.file
 
 	this.unchoked = []
 	this.interested = []
-	this.peerID
+	this.peerID 
 	this.port
 	//this.amUnchoked = this.swarm.amUnchoked
 	//this.amInterested = this.swarm.amInterested
 
-	//read torrent file or parse magnet link
-	//this.infoHash
+	this.announceUrlList = []
 
-	this.announceUrlList
-
+	/*
 	this.file  = {
 		'infoHash' : 0,
 		'name' : , //name of file
 		'piece_length' : , //piece length
 		'pieces' : , //hashes of pieces
 		'length' : 0, //length of file in bytes
-		'hashList' : [],
-	}
+	}*/
 
-	this.file = {
+	this.fileMetaData = {
 		'announceUrlList' : "",
 		'date' : "", 
 		'infoHash' : null,
@@ -117,34 +168,131 @@ function Downloader() {
 		'pieceHashes' : [],
 	}
 
-	//on startup check disk
-	//if file complete seed
-	//if file incomplete, verify pieces, begin leeching
-	let stats = {
-		'downloaded',
-		'left',
-		'uploaded',
-		'ev'
+	this.file = this.fileMetaData
+ 
+	
+	this.stats = {
+		'downloaded': 0,
+		'left': 0,
+		'uploaded': 0,
+		'ev': null //???
 	}
 
 	this.pieces = []
 
+	this.swarm = new Swarm(this.file)
+
+}
+
+Downloader.prototype.setupWithMetaInfoFile = function(metaInfoFilePath) {
+	//is path
+	let metaInfo
+	if(fs.existsSync(metaInfoFilePath)) {
+		metaInfo = bdecode(fs.readFileSync(metaInfoFilePath))
+	}
+
+	let {announceUrlList, date, info} = metaInfo
+
+	this.metaInfo 
+
+	/*
+	this.fileMetaData = {
+		'announceUrlList' : "",
+		'date' : "", 
+		'infoHash' : null,
+		'name' : "",
+		'pieceLength' : null,
+		'fileLength' : null, //num pieces = fileLength / pieceLength
+		'pieceHashes' : [],
+	}*/
+
+	let fileMetaData = this.fileMetaData
+
+	fileMetaData.announceUrlList = announceUrlList
+	fileMetaData.date = date
+	fileMetaData.name = m.name
+	fileMetaData.pieceLength = m.piece_length
+	fileMetaData.fileLength = m.length
+	fileMetaData.pieceHashes = //m.pieces.match(/.{})
+
+}
+
+Downloader.prototype.setupWithMagnetUri = function(magnetUri) {
+
+}
+
+Downloader.prototype.checkDisk = function() {
+
+}
+
+//start or resume download or seed
+Downloader.prototype.start = function() {
+	//read torrent file or parse magnet link
+	//this.infoHash
+
+	//on startup check disk
+	//if file complete seed
+	//if file incomplete, verify pieces, begin leeching
+
+
 	//announce to trackers
 	//get peer lists
-	this.peerLists = this.announce().map( x => x.peerList )
+	if() { //no peers
+		this.peerLists = this.announce().map( x => x.peerList ) 
+	}
 
-	this.swarm = new Swarm()
-	this.swarm.connectWith()
 	//setup swarm
+	this.swarm.connectPeers()
+
+	//wait for new peers
+	
 	//which peers to send interested msg to
 	//which peers to unchoke
 	//which requests to send
+
+	this.pieceQueue = []
+
+	//chose peers to unchoke - every 10 sec
+
+	setInterval( () => {
+
+		//sort by upload rate
+		unchoked = this.unchoked.filter(peer => peer.amchoked()) //remove idle peers and peers amchoked peers
+		unchokedAndIdle = this.unchoked.filter() //currently fulfilling request or having request fulfilled
+
+		candidates = this.swarm.amUnchoked.sort( (p1, p2) => p1.uploadRate >= p2.uploadRate)
+
+
+		//chose best cand and put in this.unchoke
+		while() {
+
+			candidate = candidates.shift()
+			candidate.unchoke()
+			this.unchoked.push(candidate)
+
+		}
+
+		//update pieceQueue - choose next pieces
+		hist = this.swarm.piecesByFreq()
+		//random from most freq and least freq
+		//update interested peers
+		this.pieceQueue
+
+		//push requests to peers
+
+
+	}, 600 * 1e3)
+	//chose new optimistic unchoke every 30 sec
+
+}
+
+Downloader.prototype.DHTAnnounce = async function() {
 
 }
 
 //infoHash, peerID, downloaded, left, uploaded, ev, IPAddress, key, numWant, port
 //transactID, infoHash, peerID, stats, ip, key, numWant, port
-Downloader.prototype.announce = async function() {
+Downloader.prototype.urlAnnounce = async function() {
 	//stats = {downloaded, left, uploaded, ev}
 	
 	let sock = dgram.createSocket('udp4').bind()
@@ -166,12 +314,15 @@ Downloader.prototype.announce = async function() {
 	})
 }
 
+class Torrent {
 
+	constructor() {
 
+		this.downloader = new Downloader()
 
+	}
 
-
-
+}
 
 
 
