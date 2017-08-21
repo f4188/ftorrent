@@ -6,7 +6,7 @@ module.exports = {
 Duplex = require('stream').Duplex
 Transform = require('stream').Transform
 
-//const HANDSHAKE_LENGTH
+const HANDSHAKE_LENGTH = 1 + 19 + 8 + 20 + 20 
 
 const KEEPALIVE_MSG_TYPE = null
 const CHOKE_MSG_TYPE = 0
@@ -104,7 +104,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	sock.pipe(this.parser, opts).pipe(this).pipe(sock)
 
-	this.msgHandlers = { [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
+	this.msgHandlers = { 'handshake': this.pHandshake, [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
 	[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
 	[REQUEST_MSG_TYPE] : this.pRequests, [PIECE_MSG_TYPE] : this.pPiece, [CANCEL_MSG_TYPE] : this.pCancel, 
 	[DHT_PORT_MSG_TYPE] : this.pPort, [EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : this.pExHandShake, 
@@ -126,60 +126,35 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 util.inherits(Peer, Duplex)
 
+Peer.prototype.piece = funcion(index, begin, piece) {
+
+	this.pause()
+	this.sock.write(this.makePieceMsgHeader(request.index, request.begin, request.length))
+	this.sock.write(piece)
+
+	
+		//this.resume()
+	this.finishRequest()
+	//}).bind(this))
+
+}
+
 
 Peer.prototype.finishRequest = function() {
 
-	this.pRequest.piece.unpipe(sock)
 	this.pRequest = null
-	this.resume() 
 
 	if(this.pRequest.length > 0) {
-
 		this.pRequest = this.pRequests.shift()
-		//need to let peer drain
-		self = this
-		//should read all msg outstanding before calling filfullRequest
-		//this.on('data', () => {
-		self.fulfillRequest()
-		//})
-		
+		this.fulfillRequest()
 	}
-}
-
-Peer.prototype.fulfillRequest = function() {
-
-	if(this.pRequest != null) 
-		return
-	
-	this.pRequest = this.pRequest.shift()
-	let pRequest = this.pRequest
-
-	self = this
-
-	// stream1.pipe(passthrough).pipe(stream2) same as stream1.pipe(stream2)
-
-	let piece = new PassThrough() 
-	pRequest.piece = piece
-	
-	piece.once('end', self.finishRequest) //end emitted by readable streams
-	piece.once('error', self.finishRequest)
-	piece.once('unpipe', self.finishRequest)
-
-	this.emit('peer_request', pRequest.index, pRequest.begin, pRequest.length, piece)
-
-	this.push(this.makePieceMsgHeader(request.index, request.begin, request.length))
-	this.pause()
-	piece.pipe(this.sock, opts = {'end' : false})
-	//piece.pipe(this, {'end' : false})
 
 }
 
 Peer.prototype.addListeners = function(emitter, listeners) {
 
 	for( var event in listeners) {
-
 		emitter.on(event, listeners[event])
-
 	}
 	
 }
@@ -188,12 +163,11 @@ Peer.prototype.pKeepAlive = function () {
 
 }
 
-Peer.prototype.pHandshake = function (handshake) {
+Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 
-	this.peerID = this.handshake.peerID
-	this.supportsDHT = this.handshake.supportsDHT
-	this.supportsExten = this.handshake.supportsExten
-	// {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten}
+	this.peerID = peerID
+	this.supportsDHT = supportsDHT
+	this.supportsExten = supportsExten
 
 	if(this.state != this.STATES.sent_shake) { //already sent handshake
 
@@ -249,41 +223,45 @@ Peer.prototype.pBitfield = function (pieceList) { //[1,4,6,...]
 
 }
 
-Peer.prototype.pRequest = function(request) { //index, begin, length
+Peer.prototype.pRequest = function(index, begin, length) { //index, begin, length
 
 	if(this.choked) return
-	this.pRequest.push(request)
+	this.pRequest.push( { index : index, begin: begin, length : length })
 	this.fulfillRequest()
 
 }
 
-Peer.prototype.pPiece = function (piece) { //index, begin, length, piece
+Peer.prototype.fulfillRequest = function() {
+
+	if(this.pRequest != null) 
+		return
+	
+	this.pRequest = this.pRequest.shift()
+
+	this.emit('peer_request', this.pRequest.index, this.pRequest.begin, this.pRequest.length, this)
+
+}
+
+Peer.prototype.pPiece = function (index, begin, piece) { //index, begin, length, piece
 
 	if(this.pChoke) return //discard piece
 
-	//let data = new PassThrough()
-	//data.end(piece.piece)
-	
-	this.emit('peer_piece', piece.index, piece.begin, piece.length, piece.piece)
+	this.emit('peer_piece', index, begin, length, piece)
 
 }
 
-Peer.prototype.pCancel = function (cancel) {
-	
-	if(this.pRequest.index == cancel.index && this.pRequest.begin == cancel.begin && this.pRequest.length == cancel.length) {
-		this.pRequest.piece.unpipe(this.sock)
-		return
-	} 
+Peer.prototype.pCancel = function (index, begin, length) {
 
-	let pos = this.pRequests.findIndex( request => request.index == cancel.index && request.begin == cancel.begin && request.length == cancel.length)
-	this.pRequests.splice(pos, 0)
+	let pos = this.pRequests.findIndex( request => request.index == index && request.begin == begin && request.length == length)
+	if(pos != -1)
+		this.pRequests.splice(pos, 0)
 
 }
 
-Peer.prototype.pMetaDataExRequest = function (payload) {
+Peer.prototype.pMetaDataExRequest = function (piece) {
 
 	//payload
-	let {piece} = payload
+	//let {piece} = payload
 	//if do not have whole metadata reject
 	if(this.file.info != null)
 		this.metaDataExData(piece, this.file.info.slice(piece * (2 ** 16), (piece + 1) * 2 ** 16))
@@ -292,11 +270,11 @@ Peer.prototype.pMetaDataExRequest = function (payload) {
 
 }
 
-Peer.prototype.pMetaDataExData = function(payload) {
+Peer.prototype.pMetaDataExData = function(piece, total_size, data) {
 
-	let {piece, total_size} = payload
+	//let {piece, total_size} = payload
 
-	this.metaInfoPieces.push({'piece': piece, 'data': payload.extra})
+	this.metaInfoPieces.push({'piece': piece, 'data': data})
 
 	//if(this.metaInfoPieces.map(infoPieces => infoPieces.data.length).reduce( (a,b) => a + b, 0 )
 	//	== total_size) {
@@ -306,9 +284,9 @@ Peer.prototype.pMetaDataExData = function(payload) {
 
 }
 
-Peer.prototype.pMetaDataExReject = function(payload) {
+Peer.prototype.pMetaDataExReject = function(piece) {
 
-	let {piece} = payload
+	//let {piece} = payload
 
 }
 
@@ -333,11 +311,11 @@ Peer.prototype.metaDataExDataReject = function(index) {
 
 }
 
-Peer.prototype.pPeerExchange = function (payload) {
+Peer.prototype.pPeerExchange = function (added, added6, dropped, dropped6) {
 
 	peerEx = {}
 
-	let {added, added6, dropped, dropped6} = payload
+	//let {added, added6, dropped, dropped6} = payload
 	let [addedf, added6f] = [payload['added.f'], payload['added6.f']]
 
 	peerEx.added = parsePeerContactInfosIP4(added) 
@@ -545,16 +523,19 @@ Peer.prototype._write = function(obj, encoding, callback) {
 	if(exType && exType != METADATAEX_MSG_TYPE) { //either handshake or peer exchange
 
 		handler = this.handler[type][exType]
+		//handler(obj.args)
 
 	} else if(exType && exType == METADATAEX_MSG_TYPE) {
 
 		let msg_type = obj.payload.msg_type
 		handler = this.handler[type][exType][msg_type]
+		//handler(obj.args)
 
-	} else //reg msg
+	} else //reg msg 
 		handler = this.handler[type]
 
-	handler(obj.payload)  //{type : _ , payload : { _ }}
+	handler( ... Object.values(obj.args) )
+	  //{type : _ , args : { _ }} or {type : _ , args : [ extype ,  payload]} 
 
 	callback()
 
@@ -610,7 +591,7 @@ class BitTorrentMsgParser extends Transform {
 		this.nextMsgLength = 4;
 		//reset keepalive timer
 
-		return {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten}
+		this.push( {type : 'handshake' , args: {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten} })
 
 	}
 
@@ -645,30 +626,32 @@ class BitTorrentMsgParser extends Transform {
 		let msgType = getType(msg) //string
 		msg = msg.slice(1)
 
-		let parsedMsg = { type : msgType }
+		let parsedMsg = { type : msgType, args : {} }
 
 		switch ( msgType ) {
 			case HAVE_MSG_TYPE :  
-				parsedMsg.payload = parseHaveMsg(msg)
+				parsedMsg.args = parseHaveMsg(msg)
 				break
 			case BITFIELD_MSG_TYPE :  
-				parsedMsg.payload = parseBitFieldMsg(msg)
+				parsedMsg.args = parseBitFieldMsg(msg)
 				break
 			case REQUEST_MSG_TYPE : 
-				parsedMsg.payload = parseRequestMsg(msg)
+				parsedMsg.args = parseRequestMsg(msg)
 				break
 			case PIECE_MSG_TYPE :  
-				parsedMsg.payload = parsePieceMsg(msg)
+				parsedMsg.args = parsePieceMsg(msg)
 				break
 			case CANCEL_MSG_TYPE : 
-				parsedMsg.payload = parseCancelMsg(msg)
+				parsedMsg.args = parseCancelMsg(msg)
 				break
 			case DHT_PORT_MSG_TYPE :
 				if(msgLen == 2)
-					parsedMsg.payload = msg.readUInt16BE()
+					parsedMsg.args = msg.readUInt16BE()
 				break
 			case EXTENDED_MSG_TYPE : 
-				[parsedMsg.exType, parsedMsg.payload] = parseExtendedMsg()
+				let {exType, args} = parseExtendedMsg()
+				parsedMsg.exType = exType
+				parsedMsg.args = args
 				break
 			default : 
 				return
@@ -676,10 +659,14 @@ class BitTorrentMsgParser extends Transform {
 				
 		}
 
-		if(parsedMsg.payload != undefined  && Object.keys(parseMsg.payload).length == 0) 
-			return
+		if( parseMsg.args == undefined ) {
+			//something bad
+		}
+
+		//if(parsedMsg.payload != undefined  && Object.keys(parseMsg.payload).length == 0) 
+		//	return
 		
-		//parsedMsg = { type : _ , exType : _, payload : { _ , _ , data = _ }}
+		//parsedMsg = { type : _ , exType : _, args : { _ , _ , data = _ }}
 		this.push(parsedMsg)  // push to peer
 
 	}
@@ -707,68 +694,35 @@ class BitTorrentMsgParser extends Transform {
 
 	parseRequestMsg(msg) {
 
-		request = {}
+		let index = msg.readUInt32BE(0)
+		let begin = msg.readUInt32BE(4)
+		let length = msg.readUInt32BE(8)
 
-		if(msg.length == 12) {
-
-			let index = msg.readUInt32BE(0)
-			let begin = msg.readUInt32BE(4)
-			let length = msg.readUInt32BE(8)
-
-			if(index > this.file.numPieces && begin >= 0 && begin < this.file.pieceLength 
-				&& length > 0 && length < this.file.pieceLength) {
-
-				request.index = index
-				request.begin = begin
-				request.length = length
-
-			}
-
-		}
-
-		return request
-
+		if(index > this.file.numPieces && begin >= 0 && begin < this.file.pieceLength 
+			&& length > 0 && length < this.file.pieceLength) 
+			return { index : index, begin : begin, length : length }
 	}
 
 	parseCancelMsg(index, begin, length) {
 
-		cancel = {}
-		if(msg.length == 12) {
+		let index = msg.readUInt32BE(0)
+		let begin = msg.readUInt32BE(4)
+		let length = msg.readUInt32BE(8)
 
-			let index = msg.readUInt32BE(0)
-			let begin = msg.readUInt32BE(4)
-			let length = msg.readUInt32BE(8)
-
-			if(index > this.file.numPieces && begin > 0 && begin < this.file.pieceLength
-				&& length >= 0 && length < this.file.pieceLength) {
-
-				cancel.index = index
-				cancel.begin = begin
-				cancel.length = length
-
-			}	
-		}
-
-		return cancel
+		if(index > this.file.numPieces && begin > 0 && begin < this.file.pieceLength
+			&& length >= 0 && length < this.file.pieceLength) 
+			return { index : index, begin : begin, length : length }
 
 	}
 
 	parsePieceMsg(msg) {
 
-		piece = {}
-
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
 		
 		if(index < this.file.numPieces && begin > 0 && begin < this.file.pieceLength) {
-
-			piece.index = index
-			piece.begin = begin
-			piece.piece = msg.slice(8) // usually less than 2^14 ~ 16kb
-
+			return { index : index, begin : begin, piece : msg.slice(8) }
 		}
-
-		return piece
 
 	}	
 
@@ -779,7 +733,7 @@ class BitTorrentMsgParser extends Transform {
 		let payload = benDecode(msg.slice(1))
 		payload.data = msg.slice(payload.length)
 
-		return [type, payload]
+		return { extype : type, args : payload } //{extpe: _ , args : { _ , _ , data : ... }}
 
 	}
 
@@ -800,21 +754,8 @@ class BitTorrentMsgParser extends Transform {
 
 	 	}
 
-	 	if(this.msgBuffer.length > 4 && this.msgBuffer.readUInt8(4) == PIECE_MSG_TYPE) {
-			if(!this.recvPiece) {
-				this.emit('recving_piece')
-				this.recievingPiece = true
-			}
-
-		} else {
-			if(this.recvPiece) {
-				this.emit('done_recving_piece')
-				this.recievingPiece = false
-			}
-		}
-
-		callback()
-
+	 	this.recievingPiece = this.msgBuffer.length > 4 && this.msgBuffer.readUInt8(4) == PIECE_MSG_TYPE
+	
 	}
 
 }
