@@ -1,55 +1,72 @@
 
+module.exports = {
+	'Swarm' : Swarm,
+	'Downloader' : Downloader
+}
+
 net = require('net')
 
 //currently connected peers
-function Swarm() { //ip list
+function Swarm(fileMetaData) { //ip list
 
 	this.peers = []
-	//this.badPeers 
-	//
-
-	//lists updated by listeners on events emitted by peers
-	this.amUnchoked = [] 
-	this.amInterested = []
+	
+	this.fileMetaData = fileMetaData
 
 	this.connecting = []
 	this.disconnected = []
 
+	this.listeners = {
+
+		'peer_request' : (index, begin, length, peer) => { 
+			let start = request.index * piece_length + request.begin
+			let end = request.index * piece_length + request.begin + request.length
+			let piece = fs.createReadStream(this.path, {'start': start, 'end' : end})
+			piece.pipe(peer) // piece -> peer
+ 		},
+
+		'peer_piece' : (index, begin, length, peer) => { 
+			let start = index * this.fileMetaData.pieceLength + begin
+			let piece = fs.createWriteStream(this.path, {'start': start, 'mode':'r+'})
+			peer.pipe(piece) // peer -> piece
+		} 
+
+	}
+
+	this.sockOpts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
+
 	this.UTPserver = uTP.createServer() // ...
-	this.TCPserver = net.createServer().listen()
 
-	self = this
+	this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 
-	this.TCPserver.on('connection', (function(sock) {
-		let peer = new Peer(sock, file, false) //peer owns socket
-		self.setListeners(peer)
-		peer.on('connected', )
-		sock.resume()
-	}))
+		let peer = new Peer(this.fileMetaData, this.listeners, sock) //peer owns socket
+		
+		self = this
+
+		peer.on('connected', () => {
+			self.emit('new_peer', peer)
+		})
+
+	}).listen()
+
 }
 
 Swarm.prototype.connectPeer = function (addr) {
+	
+	return new Promise((resolve, reject) => {
 
-	opts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
-	sock = net.createConnection()
-	sock.connect(addr.port, addr.host)
-
-	return new Promise(resolve, reject) {
+		let peer = new Peer(this.fileMetaData, this.listeners, null, addr)
 
 		let timeout = setTimeout(()=> {
 			reject("peer timeout")
 		}, this.defaultTimeout)
 
-		sock.on('connected', ()=> {	
-			let peer = new Peer(sock, file, true) //init is true - send handshake
-			self.setListeners(peer)
-			peer.on('connected', () => { //after recieving handshake
-				clearTimeout(timeout)
-				resolve(peer) 
-			})
-			sock.resume()
+		peer.on('connected', () => { //after recieving handshake
+			clearTimeout(timeout)
+			resolve(peer) 
 		})
-	}
+		
+	} )
 }
 
 Swarm.prototype.connectManyPeers = function (addrs) {
@@ -61,6 +78,8 @@ Swarm.prototype.addPeers = function (addrs) {
 		try {
 			peer = await promise
 			this.peers.push(peer)
+		} catch (error) {
+
 		}
 		// do something
 		//if bad peer discard
@@ -94,48 +113,23 @@ Swarm.prototype.piecesByFreq = function () {
 
 }
 
-Swarm.prototype.setListeners = function (peer) { //called after tcp or uTP connection established
-	
-	let self = this
-
-	peer.on('peer_unchoked', () => {
-		self.amUnchoked.push(peer)
-	})
-	peer.on('peer_choked', () => {
-		let index = self.amUnchoked.findIndex(peer)
-		self.amUnchoked.splice(index, 1)
-	})
-	peer.on('peer_interested', () => {
-		self.amInterested.push(peer)
-	})
-	peer.on('peer_uninterested', () => {
-		let index = self.amInterested.findIndex(peer)
-		self.amInterested.splice(index, 1)
-	})
-	peer.on('peer_request', function(request){ //only if unchoked
-		let start = request.index * piece_length + request.begin
-		let end = request.index * piece_length + request.begin + request.length
-		peer.piece(request.index, request.begin, request.length, fs.createReadStream(path, {'start': start, 'end' : end} ))
-	}) 
-	peer.on('peer_piece', function(piece) {
-		let start = piece.index * piece_length + piece.begin
-		var rs = fs.createWriteStream(path, {'start': start, 'mode':'r+'} )
-		rs.write(piece.piece)
-		rs.end()
-		//check piece hash
-	})
-	
+Swarm.prototype.unChokedPeers = function () {
+	return this.peers.filter(peer => !peer.choke)
 }
 
-/*
-downloader = Downloader()
+Swarm.prototype.amUnchokedPeers = function () {
+	return this.peers.filter(peer => !peer.pChoke)
+}
 
-client = startUpClient()
-client.addTorrent(path to torrent file/uri or magnet uri in string form) 
 
-*/
 
-//
+let unChoked = this.peers.filter(peer => !peer.choke)
+		let amUnchoked = this.peers.filter(peer => peer.pChoke) //remove idle peers and peers amchoked peers
+		let amUnchokedAndIdle = amUnchoked.filter(peer => peer.idle) //currently fulfilling request or having request fulfilled
+
+		candidates = amUnchokedAndIdle.sort( (p1, p2) => p1.uploadRate >= p2.uploadRate)
+
+
 function Downloader() {
 
 	this.pieces = []
@@ -162,14 +156,17 @@ function Downloader() {
 		'announceUrlList' : "",
 		'date' : "", 
 		'infoHash' : null,
+		'info' : null, //for metaDataExchange - must be buffer
+		'infoSize' : 0,
 		'name' : "",
 		'pieceLength' : null,
 		'fileLength' : null, //num pieces = fileLength / pieceLength
+		'numPieces' : null,
 		'pieceHashes' : [],
+		'pieces' : [] //pieces this peer has
 	}
 
 	this.file = this.fileMetaData
- 
 	
 	this.stats = {
 		'downloaded': 0,
@@ -178,9 +175,9 @@ function Downloader() {
 		'ev': null //???
 	}
 
-	this.pieces = []
+	this.pieces = this.fileMetaData.pieces
 
-	this.swarm = new Swarm(this.file)
+	this.swarm = new Swarm(this.fileMetaData)
 
 }
 
@@ -208,16 +205,23 @@ Downloader.prototype.setupWithMetaInfoFile = function(metaInfoFilePath) {
 
 	let fileMetaData = this.fileMetaData
 
+	let m = info
+
 	fileMetaData.announceUrlList = announceUrlList
+	//fileMetaData.metaDataSize = null
 	fileMetaData.date = date
 	fileMetaData.name = m.name
 	fileMetaData.pieceLength = m.piece_length
 	fileMetaData.fileLength = m.length
-	fileMetaData.pieceHashes = //m.pieces.match(/.{})
+	fileMetaData.pieceHashes = m.pieces.toString().match(/.{8}/) //string or buffer ???
 
 }
 
 Downloader.prototype.setupWithMagnetUri = function(magnetUri) {
+
+	//use metaDataEx to acquire info 
+	//do announce and get peers
+
 
 }
 
@@ -237,7 +241,7 @@ Downloader.prototype.start = function() {
 
 	//announce to trackers
 	//get peer lists
-	if() { //no peers
+	if(this.swarm) { //no peers
 		this.peerLists = this.announce().map( x => x.peerList ) 
 	}
 
@@ -252,16 +256,27 @@ Downloader.prototype.start = function() {
 
 	this.pieceQueue = []
 
+	this.optUnchoke = null
+
 	//chose peers to unchoke - every 10 sec
 
-	setInterval( () => {
+	var downloadLoop = () => {
+
+		/* this.choked
+		* this.unchoked
+		*
+
+		sort peers that have unchoked me by upload rate
+		filter idle peers 
+		select peers with highest upload rate - unchoke
+		if not enough unchoke peers with high upload rate that are interested 
+		if no upload rate history unchoke random peers that are interested
+		or if no interested 
+
+		*/
 
 		//sort by upload rate
-		unchoked = this.unchoked.filter(peer => peer.amchoked()) //remove idle peers and peers amchoked peers
-		unchokedAndIdle = this.unchoked.filter() //currently fulfilling request or having request fulfilled
-
-		candidates = this.swarm.amUnchoked.sort( (p1, p2) => p1.uploadRate >= p2.uploadRate)
-
+		
 
 		//chose best cand and put in this.unchoke
 		while() {
@@ -281,8 +296,16 @@ Downloader.prototype.start = function() {
 		//push requests to peers
 
 
-	}, 600 * 1e3)
+	}
+
+	var optUnchokeLoop = () => {
+
+	}
+
+	this.downLoop = setInterval(downloadLoop, 10 * 1e3)
+
 	//chose new optimistic unchoke every 30 sec
+	this.optLoop = setInterval(optUnchokeLoop, 30 * 1e3)
 
 }
 
@@ -323,9 +346,6 @@ class Torrent {
 	}
 
 }
-
-
-
 
 
 

@@ -1,10 +1,16 @@
 
+module.exports = {
+	'Peer' : Peer
+}
+
 Duplex = require('stream').Duplex
+Transform = require('stream').Transform
 
-const HANDSHAKE_LENGTH
+//const HANDSHAKE_LENGTH
 
-const CHOKE_MSG_TYPE = 0;
-const UNCHOKE_MSG_TYPE = 1;
+const KEEPALIVE_MSG_TYPE = null
+const CHOKE_MSG_TYPE = 0
+const UNCHOKE_MSG_TYPE = 1
 const INTERESTED_MSG_TYPE = 2
 const UNINTERESTED_MSG_TYPE = 3
 const HAVE_MSG_TYPE = 4
@@ -13,30 +19,29 @@ const REQUEST_MSG_TYPE = 6
 const PIECE_MSG_TYPE = 7
 const CANCEL_MSG_TYPE = 8
 const DHT_PORT_MSG_TYPE = 9
-const EXTENDED_MSG_TYPE = 20
+const EXTENDED_MSG_TYPE = 20 
 
-//emit amchoked, amunchoked, aminterested, amuninterest
-//handshake and piece
+const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
-function Peer(sock, file, init) {
+var PEEREX_MSG_TYPE = 1
+var METADATAEX_MSG_TYPE = 2
+
+var PPEEREX_MSG_TYPE
+var PMETADATAEX_MSG_TYPE 
+
+function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
+
+	opts = { 'readableObjectMode': true} //allowHalfOpen ??
 	Duplex.call(this)
-
-	this.sock = sock
-
-	this.msgBuffer = Buffer.alloc(0);
-	this.nextMsgLength = HANDSHAKE_LENGTH;
-	this.nextMsgParser = parseHandShake; //initially
 
 	this.uninitialized = true
 	this.connecting = false
 	this.connected = false
 	this.disconnected = false
 
-	this.STATES = {'uninitialized':0, 'sent_hshake' : 1,'connected':2, 'idle':3, 'disconnected'}
-	this.state = STATES.uninitialized
+	this.STATES = {'uninitialized':0, 'sent_hshake' : 1,'connected':2, 'disconnected': 3}
+	this.state = this.STATES.uninitialized
 
-	//stuff about peers state
-	//choke, interested state variables
 	this.pChoke = true; //i'm choked
 	this.choke = true //peer is choked
 	this.pInterested = false;
@@ -44,484 +49,786 @@ function Peer(sock, file, init) {
 
 	this.supportsExten = false //extended protocol
 	this.supportsDHT = false //mainline dht
+	
 	this.pieces = new Set() //pHave and pBitfield
+	
 	this.peerID
-	this.nodeID
-
-	//requests from peer
-	this.pRequests = [] //serialize requests here so can cancel latter
-	this.pRequest = null //request being handled
-
-	//my requests - remove on cancel or pPiece message - not really necessary
-	this.requests = []
 
 	//statistics 
+	//restart on reconnect?
 	this.downloadRate = 0
 	this.uploadRate = 0
 	this.timeConnected = 0
 	this.disconnects = 0
-	this.rtt
-	this.rttVar
 
-	//setup request handlers
-
-	//from info dict of torrent file`
-	this.file = file
-
-	var getType = function(msg) {
-		return msg[0]
-	}
-	
-	var parseHandshake = function (msg) { //maybe garbled
-		if(!this.pHandshake(msg)) 
-			return // end connection emit('invalid')
-		this.nextMsgParser = parseMsgLength;
-		this.nextMsgLength = 4;
-		//reset keepalive timer
-	}
-
-	var parseMsgLength = function (msg) { //always valid
-		if(msg.readUInt32BE(0) > 0) { //handle keepalive
-			this.nextMsgLength = msg.readUInt32BE(0);
-			this.nextMsgParser = parseMsgPayLoad;
-		}
-		//reset keepalive timer		
-	}
-	
-	var parseMsgPayLoad = function (msg) { //maybe garbled
-		//msg length always nextMsgLength
-
-		//peer already connected via tcp or utp
-		//this.keepAliveTimer goes off if no message for _ min/sec
-		//checks if nothing going in the other direction
-
-		let msgLen = this.nextMsgLength //assert(this.nextMsgLength == msg.length)
-		this.nextMsgParser = parseMsgLength;
-		this.nextMsgLength = 4
-
-		//reset keepalive timer
-		switch (getType(msg)) {
-			//empty messages
-			case CHOKE_MSG_TYPE : 
-				if(msgLen == 1) return pChoke() 
-				break
-			case UNCHOKE_MSG_TYPE : 
-				if(msgLen == 1) return pUnchoke() 
-				break
-			case INTERESTED_MSG_TYPE : 
-				if(msgLen == 1) return pInterested() 
-				break
-			case UNINTERESTED_MSG_TYPE : 
-				if(msgLen == 1) return pUnInterested() 
-				break
-			//single int message
-			case HAVE_MSG_TYPE : 
-				let hMsg = parseHaveMsg(msg)
-				if(hMsg) return pHave(hMsg) 
-				break
-			//multiple values or file piece
-			case BITFIELD_MSG_TYPE : 
-				let bMsg = parseBitFieldMsg(msg)
-				if(bMsg) return pBitfield(bMsg) 
-				break
-			case REQUEST_MSG_TYPE : 
-				let rMsg = parseRequestMsg(msg)
-				if(rMsg) return pRequest(rMsg)
-				break
-			case PIECE_MSG_TYPE : 
-				let pMsg = parsePieceMsg(msg)
-				if(pMsg) return pPiece(pMsg) 
-				break
-			case CANCEL_MSG_TYPE : 
-				let cMsg = parseCancelMsg(msg)
-				if(cMsg) return pCancel(msg) 
-				break
-			case DHT_PORT_MSG_TYPE :
-				if(msgLen == 3) return pPort(msg)
-				break
-			case EXTENDED_MSG_TYPE : return pExtended(msg) 
-			default : 
-				//ignore unrecognized messages
-				return
-		}
-		//handle invalid message with recognized type
-		//maybe ignore
-	}	
+	this.file = fileMetaData
 
 	self = this
-	sock.on('close', ()=> {
+
+	this.addListeners(listeners)
+
+	if(sock) {
+
+		this.sock = sock
+		this.host = sock.remoteAddress
+		this.port = sock.remotePort
+
+	} else {
+
+		this.host = addr.host
+		this.port = addr.port
+
+		sockOpts = { 'allowHalfOpen' : false }
+		this.sock = net.createConnection(sockOpts)
+		sock.connect(addr.port, addr.host)
+
+		sock.on('connected', () => {	
+
+			self.handshake()
+			self.state = this.STATES.sent_hshake
+
+		})
+
+	}
+
+	sock.on('close', () => {
+
 		self.state = this.STATES.disconnected
 		//clearout request queues
+
 	})
-	//peer outlive sock
-	//sock cannot end peer but peer can end sock 
+
 	var opts = {'end' : false}
-	sock.pipe(this, opts).pipe(sock)  
-	sock.resume()
-	if(init) {
-		this.handshake()
-		this.state = this.STATES.sent_hshake
+
+	this.parser = new BitTorrentMsgParser
+
+	sock.pipe(this.parser, opts).pipe(this).pipe(sock)
+
+	this.msgHandlers = { [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
+	[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
+	[REQUEST_MSG_TYPE] : this.pRequests, [PIECE_MSG_TYPE] : this.pPiece, [CANCEL_MSG_TYPE] : this.pCancel, 
+	[DHT_PORT_MSG_TYPE] : this.pPort, [EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : this.pExHandShake, 
+		[PEEREX_MSG_TYPE] : this.pPeerExchange, [METADATAEX_MSG_TYPE] : { 0: this.pMetaDataExRequest, 1: this.pMetaDataExData, 2: this.pMetaDataExReject} } 
 	}
+
+	this.pRequests = [] //serialize requests here so can cancel latter
+	this.pRequest = null
+
+	this.recievingPiece = false
+
+	self = this
+	//this.parser.on('recving_piece', () => {self.recievingPiece = true})
+	//this.parser.on('done_recving_piece', () => {self.recievingPiece = false})
+	//this.recievingPiece = 
+
+	this.idle = pPieces.length == 0 && this.pPieces == null && !this.parser.recievingPiece
+}
+
+util.inherits(Peer, Duplex)
+
+
+Peer.prototype.finishRequest = function() {
+
+	this.pRequest.piece.unpipe(sock)
+	this.pRequest = null
+	this.resume() 
+
+	if(this.pRequest.length > 0) {
+
+		this.pRequest = this.pRequests.shift()
+		//need to let peer drain
+		self = this
+		//should read all msg outstanding before calling filfullRequest
+		//this.on('data', () => {
+		self.fulfillRequest()
+		//})
+		
+	}
+}
+
+Peer.prototype.fulfillRequest = function() {
+
+	if(this.pRequest != null) 
+		return
+	
+	this.pRequest = this.pRequest.shift()
+	let pRequest = this.pRequest
+
+	self = this
+
+	// stream1.pipe(passthrough).pipe(stream2) same as stream1.pipe(stream2)
+
+	let piece = new PassThrough() 
+	pRequest.piece = piece
+	
+	piece.once('end', self.finishRequest) //end emitted by readable streams
+	piece.once('error', self.finishRequest)
+	piece.once('unpipe', self.finishRequest)
+
+	this.emit('peer_request', pRequest.index, pRequest.begin, pRequest.length, piece)
+
+	this.push(this.makePieceMsgHeader(request.index, request.begin, request.length))
+	this.pause()
+	piece.pipe(this.sock, opts = {'end' : false})
+	//piece.pipe(this, {'end' : false})
 
 }
 
-util.inherit(Duplex)
+Peer.prototype.addListeners = function(emitter, listeners) {
 
-Peer.prototype.pHandshake = function (msg) {
-	if(!msg.readUInt8(0) != 0x13) return false
-	if(!msg.slice(1,20).toString() == 'BitTorrent protocol') return false
-	if(msg.slice(28,48) != this.file.infoHash) return false
+	for( var event in listeners) {
+
+		emitter.on(event, listeners[event])
+
+	}
 	
-	//only check extension supported by this client
-	this.supportsExten = msg.readUInt8(24) & 0x10
-	this.supportsDHT = msg.readUInt8(27) & 0x01 //last bit
+}
 
-	this.peerID = msg.slice(48,68)
+Peer.prototype.pKeepAlive = function () {
 
-	if(this.state == this.STATES.unitialized || this.state == this.STATES.disconnected
-		|| this.state == this.STATES.sent_shake) { //already sent handshake
+}
+
+Peer.prototype.pHandshake = function (handshake) {
+
+	this.peerID = this.handshake.peerID
+	this.supportsDHT = this.handshake.supportsDHT
+	this.supportsExten = this.handshake.supportsExten
+	// {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten}
+
+	if(this.state != this.STATES.sent_shake) { //already sent handshake
 
 		this.state = this.STATES.connected
+		this.handshake()
 		this.emit('connected')
 
-		if(this.state == this.STATES.sent_shake) 
-			this.handshake()
-
-	} else {
-		//connected
 	}
 
 	this.bitField()
 
 	return true
+
 }
 
 Peer.prototype.pChoke = function () {
+
 	this.pChoke = true //kill all requests??
 	this.emit('peer_choked')
+
 }
 
 Peer.prototype.pUnchoke = function() {
+
 	this.pChoke = false
 	this.emit('peer_unchoked')
+
 }
 
 Peer.prototype.pInterested = function() {
+
 	this.pInterested = true
 	this.emit('peer_interested')
+
 }
 
 Peer.prototype.pUninterested = function() {
+
 	this.pInterested = false
 	this.emit('peer_uninterested')
+
 }
 
 Peer.prototype.pHave = function(pieceIndex) { //just a piece index
+
 	this.pieces.add(pieceIndex)
+
 }
 
 Peer.prototype.pBitfield = function (pieceList) { //[1,4,6,...]
-	pieceList.forEach((function(pieceIndex) {this.pHave(pieceIndex)}).bind(this))
+
+	pieceList.forEach((function(pieceIndex) { this.pHave(pieceIndex) }).bind(this))
+
 }
 
 Peer.prototype.pRequest = function(request) { //index, begin, length
-	if(this.choked) return //error?
-	this.pRequests.push(request)
-	if(!this.pRequest) {
-		this.pRequest = this.pRequests.pop()
-		self = this
-		this.emit('peer_request', self.request)
-	}
+
+	if(this.choked) return
+	this.pRequest.push(request)
+	this.fulfillRequest()
 
 }
-//me
-//request => pPiece
-//peer
-//pRequest => piece
-Peer.prototype.pPiece = function (piece) {
-	//check piece hash
-	//remove request from queue
-	if(this.pChoke) {
-		//do something/
-	}
-	var i = 0
-	for(; i < this.requests; i++) {
-		let {rindex, rbegin, rlength} = this.requests[i]
-		if(rindex == piece.index && rbegin == piece.begin && rlength == piece.piece.length)
-			this.requests.splice(i, 1)
-	}
-	if(i != this.requests.length)
-		this.emit('peer_piece', piece)
+
+Peer.prototype.pPiece = function (piece) { //index, begin, length, piece
+
+	if(this.pChoke) return //discard piece
+
+	//let data = new PassThrough()
+	//data.end(piece.piece)
+	
+	this.emit('peer_piece', piece.index, piece.begin, piece.length, piece.piece)
+
 }
 
-Peer.prototype.pCancel = function (index, begin, length) {
-	//what if serving request now ?
-	for(var i = 0; i < this.pRequests; i++) {
-		let {rindex, rbegin, rlength} = this.pRequests[i]
-		if(rindex == index && rbegin == begin && rlength == length)
-			this.pRequests.splice(i, 1)
-	}
-	if( == this.pRequest) 
+Peer.prototype.pCancel = function (cancel) {
+	
+	if(this.pRequest.index == cancel.index && this.pRequest.begin == cancel.begin && this.pRequest.length == cancel.length) {
 		this.pRequest.piece.unpipe(this.sock)
+		return
+	} 
+
+	let pos = this.pRequests.findIndex( request => request.index == cancel.index && request.begin == cancel.begin && request.length == cancel.length)
+	this.pRequests.splice(pos, 0)
+
 }
 
-Peer.prototype.pExtended = function (msg) {
-	if(msg[0] == 0x0) { //handshake
-		//m dict, p tcp listen port, v client name & ver, yourip , ipv6, ipv4, reqq total req mes without dropping
-		let {m, p, v, yourip, ipv6, ipv4, reqq, reqq} = bdecode(msg)
-		this.m = m
-		//ut_pex, ut_metadata	
-	} else if(msg[0] == this.m['ut_pex']) {
-		payload = bdecode(msg)
-		let {added, added6, dropped, dropped6} = payload
-		let addedf, added6f = payload['added.f'], payload['added6.f']
-		parsePeerContactInfos()
-	} else if(msg[0] == this.m['ut_metadata']) {
-		
-		
+Peer.prototype.pMetaDataExRequest = function (payload) {
+
+	//payload
+	let {piece} = payload
+	//if do not have whole metadata reject
+	if(this.file.info != null)
+		this.metaDataExData(piece, this.file.info.slice(piece * (2 ** 16), (piece + 1) * 2 ** 16))
+	else 
+		this.metaDataExDataReject(piece)
+
+}
+
+Peer.prototype.pMetaDataExData = function(payload) {
+
+	let {piece, total_size} = payload
+
+	this.metaInfoPieces.push({'piece': piece, 'data': payload.extra})
+
+	//if(this.metaInfoPieces.map(infoPieces => infoPieces.data.length).reduce( (a,b) => a + b, 0 )
+	//	== total_size) {
+		//this.file.info = this.metaInfoPieces.map(infoPieces => infoPieces.data).reduce( (a,b) => Buffer.concat([a,b]), Buffer.alloc(0))
+		//check hash
+	//}
+
+}
+
+Peer.prototype.pMetaDataExReject = function(payload) {
+
+	let {piece} = payload
+
+}
+
+Peer.prototype.metaDataExRequest = function (index) {
+
+	let reqMsg = benEncode({'msg_type': 0, 'piece': index })
+	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], reqMsg))
+
+}
+
+Peer.prototype.metaDataExData = function(index, data) {
+
+	let dataMsg = benEncode({'msg_type': 1, 'piece': index, 'total_size': this.file.infoSize})
+	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], dataMsg))
+
+}
+
+Peer.prototype.metaDataExDataReject = function(index) {
+	
+	let rejectMsg = benEncode({'msg_type': 2, 'piece': index})
+	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], rejectMsg))
+
+}
+
+Peer.prototype.pPeerExchange = function (payload) {
+
+	peerEx = {}
+
+	let {added, added6, dropped, dropped6} = payload
+	let [addedf, added6f] = [payload['added.f'], payload['added6.f']]
+
+	peerEx.added = parsePeerContactInfosIP4(added) 
+	addedf.forEach( (byte, i) => { peerEx.added[i].parseFlags(byte) } )
+
+	peerEx.added6 = parsePeerContactInfosIP6(added6)
+	added6f.forEach( (byte, i) => { peerEx.added6[i].parseFlags(byte) } )
+
+	peerEx.dropped = parsePeerContactInfosIP4(dropped)
+	peerEx.dropped6 = parsePeerContactInfosIP6(dropped6)
+
+	this.emit('peer_exchange', peerEx)
+	//{added : [peer1, peer2, ... ], added6 : [], ...}
+
+}
+
+Peer.prototype.PeerExchange = function (peerInfos, droppedPeerInfos) {
+
+	let peerExMsg = {  //strings or buffers ??
+		added : Buffer.from(peerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
+		added6 : Buffer.from(peerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
+		dropped : Buffer.from(droppedPeerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")),
+		dropped6 : Buffer.from(droppedPeerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
+		addedf : Buffer.concat( peerInfos.filter(peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.makeFlags() )),
+		added6f : Buffer.concat( peerInfos.filter(peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.makeFlags() ))
 	}
+
+	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PPEEREX_MSG_TYPE], bencode(peerExMsg)))
+	
 }
 
-Peer.prototype.pPort = function (msg) {
-	this.nodeID = msg.readUInt16BE()
-}
+Peer.prototype.pPort = function (payload) {
 
+	let pPort = payload
+	this.nodePort = pPort
+	this.emit('DHT_port', pPort, this.hostIP)
+
+}
 
 Peer.prototype.handshake = function() {
-	let nineteen = new Buffer(1).writeUInt8
-	let bitTorrent = new Buffer()
-	let buf = Buffer.concat([nineteen, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.peerId])
+
+	let nt = new Buffer(1)
+	nt.writeUInt8(0x13)
+
+	let bitTorrent = Buffer.from('BitTorrent')
+
+	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.peerId])
 
 	//only check extension supported by this client
 	buf.writeUInt8(buf.readUInt8(24) | 0x10) 
 	buf.writeUInt8(buf.readUInt8(27) | 0x01)
-	this.connecting = true
 	this.push(buf)
+
+	this.exHandShake()
+
+}
+
+Peer.prototype.keepAlive = function() {
+
+	this.push(Buffer.alloc(4))
+
+}
+
+Peer.prototype.port = function(port) {
+
+	let bufPort = Buffer.alloc(2)
+	bufPort.writeUInt16BE(port)
+	this.push(makeMsg(DHT_PORT_MSG_TYPE, bufPort))
+
+}
+
+Peer.prototype.pExHandShake = function(payload) {
+
+	let {m, p, v, yourip, ipv6, ipv4, reqq, metadata_size} = payload
+	
+	this.fileMetaData.infoSize = metadata_size
+	this.m = m
+	this.pVersion = v
+	PPEEREX_MSG_TYPE = m['ut_pex']
+	PMETADATAEX_MSG_TYPE = m['ut_metadata']
+	
+}
+
+Peer.prototype.exHandShake = function() {
+
+	let yourip = this.sock.address().address
+	if(this.sock.address().family == 'IPv4')
+		yourip = yourip.split('.')
+	else 
+		yourip = yourip.split(':')
+
+	let exHandShake = { m : {'ut_pex' : PEEREX_MSG_TYPE, 'ut_metadata' : METADATAEX_MSG_TYPE}, 
+	p : this.sock.address().port, v : this.version, yourip : yourip, reqq : 16 } 
+
+	let payload = benEncode(exHandShake)
+	this.push(this.makeMsg([EXTENDED_MSG_TYPE, EXTENDED_HANDSHAKE_MSG_TYPE], payload))
+
+}
+
+Peer.prototype.makeMsg = function(type, ...args) { // ...args = [int1, int2, buffer1, int3, ... ]
+
+	var bufferFrom = (num) => { let buf = Buffer.alloc(4); buf.writeUInt32BE(num); return buf}
+
+	let buf = Buffer.alloc(6)
+	let msgLen = 0
+
+	if(Array.isArray(type)) {
+		buf.writeUInt8(type[0], 4)
+		buf.writeUInt8(type[1], 4 + 1)
+		msglen ++
+	} else {
+		buf = buf.slice(0,5).writeUInt8(type, 4)
+	}
+
+	msgLen += 1 + args.map(arg => Number.isInteger(arg) ? 4 : arg.length).reduce((a,b) => a+b, 0)
+	buf.writeUInt32BE(msglen, 0)
+
+	let argBuf = Buffer.concat(args.map(arg => Buffer.isBuffer(arg) ? arg : bufferFrom(arg)))
+
+	return Buffer.concat([buf, argBuf])
+
 }
 
 Peer.prototype.choke = function() {
+
 	this.choke = true
-	let buf = Buffer.alloc(5)
-	buf.writeUInt32BE(1, 0)
-	buf.writeUInt8(CHOKE_MSG_TYPE, 5)
-	this.push(buf)
+	this.push(this.makeMsg(CHOKE_MSG_TYPE))
+
 }
 
 Peer.prototype.unchoke = function() {
+
 	this.choke = false
-	let buf = Buffer.alloc(5)
-	buf.writeUInt32BE(1, 0)
-	buf.writeUInt8(UNCHOKE_MSG_TYPE, 5)
-	this.push(buf)
+	this.push(this.makeMsg(UNCHOKE_MSG_TYPE))
+
 }
 
 Peer.prototype.interested = function() {
+
 	this.interested = true
-	let buf = Buffer.alloc(5)
-	buf.writeUInt32BE(1, 0)
-	buf.writeUInt8(INTERESTED_MSG_TYPE, 5)
-	this.push(buf)
+	this.push(this.makeMsg(INTERESTED_MSG_TYPE))
+
 }
 
 Peer.prototype.unInterested = function() {
+
 	this.interested = false
-	let buf = Buffer.alloc(5)
-	buf.writeUInt32BE(1, 0)
-	buf.writeUInt8(UNINTERESTED_MSG_TYPE, 5)
-	this.push(buf)
+	this.push(this.makeMsg(UNINTERESTED_MSG_TYPE))
+
 }
 
 Peer.prototype.have = function(pieceIndex) {
-	this.push(makeHaveMsg(pieceIndex))
+
+	this.push(makeMsg(HAVE_MSG_TYPE, pieceIndex))
+
 }
 
 Peer.prototype.bitfield = function () {
-	let pieceIndexList = this.pieceIndexList
-	this.push(makeBitFieldMsg(pieceIndexList))
+
+	this.push(makeBitFieldMsg(this.file.pieces))
+
 }
 
 Peer.prototype.request = function(index, begin, length) {
-	//send request 
-	this.requests.push({'index':index, 'begin':begin, 'length':length})
-	this.push(makeRequestMsg(index, begin, length))
-}
 
-//called by peer_request listener
-Peer.prototype.piece = function (index, begin, length, piece) {
-	this.push(makePieceMsg(index, begin, length))
-	this.pause()
-	self = this
-	var finishRequest = function() {
-		self.unpause(); 
-		self.request = null; 
-		if(self.pRequests.length != 0) {
-			self.pRequest = self.pRequests.pop()
-			self.emit('peer_request', self.request)
-		}
-	}
-
-	piece.on('end', finishRequest)
-	piece.on('unpipe', finishRequest)
-	this.pRequest.piece = piece
-	piece.pipe(this.sock, {'end': false}) //piece -> peer - pause everything until done
+	this.push(makeMsg(REQUEST_MSG_TYPE, index, begin, length))
 
 }
 
 Peer.prototype.cancel = function (index, begin, length) {
-	var i = 0
-	for(; i < this.requests; i++) {
-		let {rindex, rbegin, rlength} = this.requests[i]
-		if(rindex == index && rbegin == begin && rlength == length)
-			this.requests.splice(i, 1)
-	}
-	if(i != this.requests.length)
-		this.push(makeCancelMsg(index, begin, length))
-}
 
-Peer.prototype. __ = function () {
+	this.push(this.makeMsg(CANCEL_MSG_TYPE, index, begin, length))
 
 }
 
+Peer.prototype.makeBitFieldMsg = function(pieces) {
 
-
-Peer.prototype.parseHaveMsg = function(msg) {
-	return msg.readUInt32BE() //just return int
-}
-
-Peer.prototype.makeHaveMsg = function(pieceIndex) {
-	return Buffer.alloc(4).writeUInt32BE(pieceIndex)
-}
-
-Peer.prototype.parseBitFieldMsg = function(msg) {
-	//check bitfield length
-	bitField = []
-	bitFieldLength = this.file.pieces % 8 == 0 ? this.file.pieces / 8 : (this.file.pieces / 8 + 1)
-	if(msg.length != bitFieldLength && (msg.slice(-1) & // ) ) return ret
-
-	msg.forEach(function(byte, i, v) {
-		while(byte >>= 1) 
-			bitField.push(i++)
-	})
-	return bitField
-}
-
-Peer.prototype.makeBitFieldMsg = function(pieceIndexList) {
-	let buf = this.pieces % 8 == 0 ? this.pieces / 8 : ((this.pieces / 8) + 1)
+	let bitFieldLength = pieces % 8 == 0 ? pieces / 8 : ((pieces / 8) + 1)
 	
 	bitField = Buffer.alloc(bitFieldLength)
-	pieceIndexList.forEach(function(pieceIndex) {
+
+	this.pieces.forEach(function(pieceIndex) {
 		var byte = bitField.readUInt32BE(pieceIndex / 8)
 		byte &= pieceIndex % 8
 		bitField.writeUInt32BE(byte)
 	}) 
 
-	return buf
+	return this.push(this.makeMsg(BITFIELD_MSG_TYPE, bitField))
+
 }
 
-Peer.prototype.parseRequestMsg = function(msg) {
-	//index, begin, length
-	request = {}
-	if(msg.length == 12) {
-		let index = msg.readUInt32BE(0)
-		if(index > this.file.length) 
-			request.index = index
-		let begin = msg.readUInt32BE(4)
-		if(begin >= 0 && begin < this.file.piece_length)
-			request.begin = begin
-		let length = msg.readUInt32BE(8)
-		if(length > 0 && length < this.file.piece_length)
-			request.length = length
-	}
-	return request
-}
+Peer.prototype._final = function() {
 
-Peer.prototype.makeRequestMsg = function(index, begin, length) {
-	let msgLen = 4 + 1 + 12
-	let buf = Buffer.alloc(msgLen)
-	buf.writeUInt32BE(msgLen, 0)
-	buf.writeUInt8(REQUEST_MSG_TYPE, 4)
-	buf.writeUInt32BE(index, 5)
-	buf.writeUInt32BE(begin, 9)
-	buf.writeUInt32BE(length, 13)
-	return buf
-}
-
-Peer.prototype.parseCancelMsg = function(index, begin, length) {
-	cancel = {}
-	if(msg.length == 12) {
-		let index = msg.readUInt32BE(0)
-		if(index > this.file.length) 
-			cancel.index = index
-		let begin = msg.readUInt32BE(4)
-		if(begin > 0 && begin < this.file.piece_length)
-			cancel.begin = begin
-		let length = msg.readUInt32BE(8)
-		if(length > )
-			cancel.length = length
-	}
-	return cancel
-}
-
-Peer.prototype.makeCancelMsg = function(index, begin, length) {
-	let msgLen = 4 + 1 + 12
-	let buf = Buffer.alloc(msgLen)
-	buf.writeUInt32BE(msgLen, 0)
-	buf.writeUInt8(CANCEL_MSG_TYPE, 4)
-	buf.writeUInt32BE(index, 5)
-	buf.writeUInt32BE(begin, 9)
-	buf.writeUInt32BE(length, 13)
-	return buf
-}
-
-Peer.prototype.parsePieceMsg = function(msg) {
-	piece = {}
-	//if(msg.length == 12) {
-	let index = msg.readUInt32BE(0)
-	if(index > this.file.length) 
-		piece.index = index
-	let begin = msg.readUInt32BE(4)
-	if(begin > 0 && begin < this.file.piece_length)
-		piece.begin = begin
-	piece.piece = msg.slice(8)
-	//}
-	return piece
-}
-
-Peer.prototype.makePieceMsgHeader = function(index, begin, length) { //piece is already buffer
-	let buf = Buffer.alloc(4 + 1 + 4 + 4)
-	buf.writeUInt32BE(13 + length, 0)
-	buf.writeUInt8(PIECE_MSG_TYPE, 4)
-	buf.writeUInt32BE(index, 5)
-	buf.writeUInt32BE(begin, 9)
-	return buf//Buffer.concat([buf, piece])
-}
-
-Peer.prototype._final() {
 	//socket writes end when dead
 	//_final called before end completes
 
 }
 
-Peer.prototype._read() {}
+Peer.prototype._write = function(obj, encoding, callback) {
 
-//if next message is large i.e. a piece message then this function called repeatedly until entire message concatenated to this.msgBuffer
-Peer.prototype._write(chunk, encoding, callback) {
-	
-	this.msgBuffer = Buffer.concat(this.msgBuffer, chunk);
-	var nextMsg;
-	while(this.msgBuffer.length > this.nextMsgLength) {
-		//have whole message
-		nextMsg = msgBuffer.slice(0,this.nextMsgLength)
-		this.msgBuffer = msgBuffer.slice(this.nextMsgLength)
-		this.nextMsgParser(nextMsg); 
-		//nextMsgLength changed, nextMsg sliced
+	let type = obj.type
+	let exType = obj.exType
+	let handler 
 
-		//maybe reset keepalive here
- 	}
+	if(exType && exType != METADATAEX_MSG_TYPE) { //either handshake or peer exchange
+
+		handler = this.handler[type][exType]
+
+	} else if(exType && exType == METADATAEX_MSG_TYPE) {
+
+		let msg_type = obj.payload.msg_type
+		handler = this.handler[type][exType][msg_type]
+
+	} else //reg msg
+		handler = this.handler[type]
+
+	handler(obj.payload)  //{type : _ , payload : { _ }}
+
 	callback()
+
+}
+
+function parsePeerContactInfosIP4(compactInfos) {
+
+	return compactInfos.match(/.{6}/).map(info => new PeerInfo( info.slice(4,6).readUInt16BE(), info.slice(0,4)) )
+
+}
+
+function parsePeerContactInfosIP6(compactInfos) {
+
+	return compactInfos.match(/.{18}/).map(info => new PeerInfo( info.slice(16,18).readUInt16BE(), info.slice(0,16)) )
+
+}
+
+class BitTorrentMsgParser extends Transform {
+
+	constructor(file) {
+
+		//reader reads objects, writer writes buffers
+		opts = { readableObjectMode : true, highWaterMark : 16384 * 2 }
+
+		super(opts)
+
+		this.file = file
+		this.msgBuffer = Buffer.alloc(0);
+		this.nextMsgLength = HANDSHAKE_LENGTH;
+		this.nextMsgParser = parseHandShake; //initially
+
+	}
+
+	getType(msg) {
+
+		return msg[0].readUInt8()
+
+	}
+	
+	parseHandshake(msg) { //maybe garbled
+		
+		if(!msg.readUInt8(0) != 0x13
+			|| !msg.slice(1,20).toString() == 'BitTorrent protocol'
+			|| msg.slice(28,48) != this.file.infoHash) return {}
+	
+		//only check extension supported by this client
+		let supportsExten = msg.readUInt8(24) & 0x10
+		let supportsDHT = msg.readUInt8(27) & 0x01 //last bit
+
+		let peerID = msg.slice(48,68)
+
+		this.nextMsgParser = parseMsgLength;
+		this.nextMsgLength = 4;
+		//reset keepalive timer
+
+		return {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten}
+
+	}
+
+	parseMsgLength(msg) { //always valid
+
+		if(msg.readUInt32BE(0) > 0) { //handle keepalive
+
+			this.nextMsgLength = msg.readUInt32BE(0)
+			this.nextMsgParser = parseMsgPayLoad
+
+		} else {
+
+			return { type: 'KEEPALIVE_MSG_TYPE', payload: null }
+
+		}
+		//reset keepalive timer	
+
+	}
+	
+	parseMsgPayLoad(msg) { //maybe garbled
+
+		//this.keepAliveTimer goes off if no message for _ min/sec
+		//checks if nothing going in the other direction
+
+		let msgLen = this.nextMsgLength //assert(this.nextMsgLength == msg.length)
+
+		this.nextMsgParser = parseMsgLength;
+		this.nextMsgLength = 4
+
+		//reset keepalive timer
+
+		let msgType = getType(msg) //string
+		msg = msg.slice(1)
+
+		let parsedMsg = { type : msgType }
+
+		switch ( msgType ) {
+			case HAVE_MSG_TYPE :  
+				parsedMsg.payload = parseHaveMsg(msg)
+				break
+			case BITFIELD_MSG_TYPE :  
+				parsedMsg.payload = parseBitFieldMsg(msg)
+				break
+			case REQUEST_MSG_TYPE : 
+				parsedMsg.payload = parseRequestMsg(msg)
+				break
+			case PIECE_MSG_TYPE :  
+				parsedMsg.payload = parsePieceMsg(msg)
+				break
+			case CANCEL_MSG_TYPE : 
+				parsedMsg.payload = parseCancelMsg(msg)
+				break
+			case DHT_PORT_MSG_TYPE :
+				if(msgLen == 2)
+					parsedMsg.payload = msg.readUInt16BE()
+				break
+			case EXTENDED_MSG_TYPE : 
+				[parsedMsg.exType, parsedMsg.payload] = parseExtendedMsg()
+				break
+			default : 
+				return
+				//ignore unrecognized messages
+				
+		}
+
+		if(parsedMsg.payload != undefined  && Object.keys(parseMsg.payload).length == 0) 
+			return
+		
+		//parsedMsg = { type : _ , exType : _, payload : { _ , _ , data = _ }}
+		this.push(parsedMsg)  // push to peer
+
+	}
+
+	parseHaveMsg(msg) {
+
+		return msg.readUInt32BE() //just return int
+
+	}
+
+	parseBitFieldMsg(msg) {
+
+		bitField = []
+
+		msg.forEach(function(byte, i, v) {
+
+			while(byte >>= 1) 
+				bitField.push(i++)
+
+		})
+
+		return bitField
+
+	}
+
+	parseRequestMsg(msg) {
+
+		request = {}
+
+		if(msg.length == 12) {
+
+			let index = msg.readUInt32BE(0)
+			let begin = msg.readUInt32BE(4)
+			let length = msg.readUInt32BE(8)
+
+			if(index > this.file.numPieces && begin >= 0 && begin < this.file.pieceLength 
+				&& length > 0 && length < this.file.pieceLength) {
+
+				request.index = index
+				request.begin = begin
+				request.length = length
+
+			}
+
+		}
+
+		return request
+
+	}
+
+	parseCancelMsg(index, begin, length) {
+
+		cancel = {}
+		if(msg.length == 12) {
+
+			let index = msg.readUInt32BE(0)
+			let begin = msg.readUInt32BE(4)
+			let length = msg.readUInt32BE(8)
+
+			if(index > this.file.numPieces && begin > 0 && begin < this.file.pieceLength
+				&& length >= 0 && length < this.file.pieceLength) {
+
+				cancel.index = index
+				cancel.begin = begin
+				cancel.length = length
+
+			}	
+		}
+
+		return cancel
+
+	}
+
+	parsePieceMsg(msg) {
+
+		piece = {}
+
+		let index = msg.readUInt32BE(0)
+		let begin = msg.readUInt32BE(4)
+		
+		if(index < this.file.numPieces && begin > 0 && begin < this.file.pieceLength) {
+
+			piece.index = index
+			piece.begin = begin
+			piece.piece = msg.slice(8) // usually less than 2^14 ~ 16kb
+
+		}
+
+		return piece
+
+	}	
+
+	parseExtendedMsg(msg) {
+
+		let type = msg[0].readUInt8()
+		//benDecode must only parse longest valid bencoded string
+		let payload = benDecode(msg.slice(1))
+		payload.data = msg.slice(payload.length)
+
+		return [type, payload]
+
+	}
+
+	//eats msgs - on piece msg waits for entire msg and then pushes {index, begin, piece} to peer
+	//recvPiece true for this time
+	_transform(chunk, encoding, callback) {
+
+		this.msgBuffer = Buffer.concat(this.msgBuffer, chunk)
+
+		var nextMsg
+
+		while(this.msgBuffer.length > this.nextMsgLength) {
+			
+			nextMsg = msgBuffer.slice(0,this.nextMsgLength)
+			this.msgBuffer = msgBuffer.slice(this.nextMsgLength)
+
+			this.nextMsgParser(nextMsg)
+
+	 	}
+
+	 	if(this.msgBuffer.length > 4 && this.msgBuffer.readUInt8(4) == PIECE_MSG_TYPE) {
+			if(!this.recvPiece) {
+				this.emit('recving_piece')
+				this.recievingPiece = true
+			}
+
+		} else {
+			if(this.recvPiece) {
+				this.emit('done_recving_piece')
+				this.recievingPiece = false
+			}
+		}
+
+		callback()
+
+	}
+
 }
 
 
-function parsePeerContactInfos(compactInfos) {
-	return compactInfos.map(info => new Peer(info.slice(0,2), info.slice(2,6))
-}
+
+
+
+
+
+
+
+
+
+
+
+
