@@ -23,11 +23,11 @@ const EXTENDED_MSG_TYPE = 20
 
 const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
-var PEEREX_MSG_TYPE = 1
-var METADATAEX_MSG_TYPE = 2
+//const PEEREX_MSG_TYPE = 1
+//const METADATAEX_MSG_TYPE = 2
 
-var PPEEREX_MSG_TYPE
-var PMETADATAEX_MSG_TYPE 
+//var PPEEREX_MSG_TYPE
+//var PMETADATAEX_MSG_TYPE 
 
 function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
@@ -49,8 +49,10 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	this.supportsExten = false //extended protocol
 	this.supportsDHT = false //mainline dht
+	this.supportedExtensions = {}
+	this.recvExtensions = {}
 	
-	this.pieces = new Set() //pHave and pBitfield
+	this.pieces = new NSet() //pHave and pBitfield
 	
 	this.peerID
 
@@ -63,7 +65,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	this.file = fileMetaData
 
-	self = this
+	let self = this
 
 	this.addListeners(listeners)
 
@@ -78,7 +80,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		this.host = addr.host
 		this.port = addr.port
 
-		sockOpts = { 'allowHalfOpen' : false }
+		let sockOpts = { 'allowHalfOpen' : false }
 		this.sock = net.createConnection(sockOpts)
 		sock.connect(addr.port, addr.host)
 
@@ -98,6 +100,12 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	})
 
+	sock.on('error', () => {
+
+		self.state = this.STATES.disconnected
+
+	})
+
 	var opts = {'end' : false}
 
 	this.parser = new BitTorrentMsgParser
@@ -105,23 +113,15 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	sock.pipe(this.parser, opts).pipe(this).pipe(sock)
 
 	this.msgHandlers = { 'handshake': this.pHandshake, [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
-	[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
-	[REQUEST_MSG_TYPE] : this.pRequests, [PIECE_MSG_TYPE] : this.pPiece, [CANCEL_MSG_TYPE] : this.pCancel, 
-	[DHT_PORT_MSG_TYPE] : this.pPort, [EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : this.pExHandShake, 
-		[PEEREX_MSG_TYPE] : this.pPeerExchange, [METADATAEX_MSG_TYPE] : { 0: this.pMetaDataExRequest, 1: this.pMetaDataExData, 2: this.pMetaDataExReject} } 
+		[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
+		[REQUEST_MSG_TYPE] : this.pRequests, [PIECE_MSG_TYPE] : this.pPiece, [CANCEL_MSG_TYPE] : this.pCancel, 
+		[DHT_PORT_MSG_TYPE] : this.pPort, [EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : this.pExHandShake }
 	}
 
 	this.pRequests = [] //serialize requests here so can cancel latter
 	this.pRequest = null
 
-	this.recievingPiece = false
-
-	self = this
-	//this.parser.on('recving_piece', () => {self.recievingPiece = true})
-	//this.parser.on('done_recving_piece', () => {self.recievingPiece = false})
-	//this.recievingPiece = 
-
-	this.idle = pPieces.length == 0 && this.pPieces == null && !this.parser.recievingPiece
+	this.idle = this.pRequest == null && !this.parser.recievingPiece
 }
 
 util.inherits(Peer, Duplex)
@@ -129,16 +129,21 @@ util.inherits(Peer, Duplex)
 Peer.prototype.piece = funcion(index, begin, piece) {
 
 	this.pause()
-	this.sock.write(this.makePieceMsgHeader(request.index, request.begin, request.length))
-	this.sock.write(piece)
+	let p = new PassThrough() //set highwatermark
+	p.pipe(this.sock)
+	//this.sock.write(this.makePieceMsgHeader(request.index, request.begin, request.length))
+	//this.sock.write(piece)
+	p.write(this.makePieceMsgHeader(request.index, request.begin, request.length))
+	p.write(piece)
+	p.on('end', (()=> { p.unpipe(this.sock); this.resume(); this.finishRequest() }).bind(this))
+	//p.on('error')
+	//p.on('unpipe')
 
-	
-		//this.resume()
-	this.finishRequest()
-	//}).bind(this))
+	//need to know when done
+
+	//this.finishRequest()
 
 }
-
 
 Peer.prototype.finishRequest = function() {
 
@@ -178,6 +183,7 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 	}
 
 	this.bitField()
+	this.exHandShake()
 
 	return true
 
@@ -211,19 +217,36 @@ Peer.prototype.pUninterested = function() {
 
 }
 
-Peer.prototype.pHave = function(pieceIndex) { //just a piece index
+Peer.prototype.updateInterested = function() {
+
+	if(!this.interested && this.pieces.difference(this.fileMetaData.pieces).size > 0)
+		this.interested()
+
+}
+
+Peer.prototype.pHave = function(pieceIndex) { 
 
 	this.pieces.add(pieceIndex)
+	this.updateInterested()
+	
+}
+
+Peer.prototype.pBitfield = function (pieceList) { 
+
+	pieceList.forEach( (function(pieceIndex) { this.pieces.add(pieceIndex) }).bind(this))
+	this.updateInterested()
+	
+	//is seeder ??
 
 }
 
-Peer.prototype.pBitfield = function (pieceList) { //[1,4,6,...]
+Peer.prototype.isSeeder = function() {
 
-	pieceList.forEach((function(pieceIndex) { this.pHave(pieceIndex) }).bind(this))
-
+	return this.pieces.size == this.fileMetaData.numPiece
+	
 }
 
-Peer.prototype.pRequest = function(index, begin, length) { //index, begin, length
+Peer.prototype.pRequest = function(index, begin, length) { 
 
 	if(this.choked) return
 	this.pRequest.push( { index : index, begin: begin, length : length })
@@ -258,100 +281,11 @@ Peer.prototype.pCancel = function (index, begin, length) {
 
 }
 
-Peer.prototype.pMetaDataExRequest = function (piece) {
-
-	//payload
-	//let {piece} = payload
-	//if do not have whole metadata reject
-	if(this.file.info != null)
-		this.metaDataExData(piece, this.file.info.slice(piece * (2 ** 16), (piece + 1) * 2 ** 16))
-	else 
-		this.metaDataExDataReject(piece)
-
-}
-
-Peer.prototype.pMetaDataExData = function(piece, total_size, data) {
-
-	//let {piece, total_size} = payload
-
-	this.metaInfoPieces.push({'piece': piece, 'data': data})
-
-	//if(this.metaInfoPieces.map(infoPieces => infoPieces.data.length).reduce( (a,b) => a + b, 0 )
-	//	== total_size) {
-		//this.file.info = this.metaInfoPieces.map(infoPieces => infoPieces.data).reduce( (a,b) => Buffer.concat([a,b]), Buffer.alloc(0))
-		//check hash
-	//}
-
-}
-
-Peer.prototype.pMetaDataExReject = function(piece) {
-
-	//let {piece} = payload
-
-}
-
-Peer.prototype.metaDataExRequest = function (index) {
-
-	let reqMsg = benEncode({'msg_type': 0, 'piece': index })
-	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], reqMsg))
-
-}
-
-Peer.prototype.metaDataExData = function(index, data) {
-
-	let dataMsg = benEncode({'msg_type': 1, 'piece': index, 'total_size': this.file.infoSize})
-	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], dataMsg))
-
-}
-
-Peer.prototype.metaDataExDataReject = function(index) {
-	
-	let rejectMsg = benEncode({'msg_type': 2, 'piece': index})
-	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], rejectMsg))
-
-}
-
-Peer.prototype.pPeerExchange = function (added, added6, dropped, dropped6) {
-
-	peerEx = {}
-
-	//let {added, added6, dropped, dropped6} = payload
-	let [addedf, added6f] = [payload['added.f'], payload['added6.f']]
-
-	peerEx.added = parsePeerContactInfosIP4(added) 
-	addedf.forEach( (byte, i) => { peerEx.added[i].parseFlags(byte) } )
-
-	peerEx.added6 = parsePeerContactInfosIP6(added6)
-	added6f.forEach( (byte, i) => { peerEx.added6[i].parseFlags(byte) } )
-
-	peerEx.dropped = parsePeerContactInfosIP4(dropped)
-	peerEx.dropped6 = parsePeerContactInfosIP6(dropped6)
-
-	this.emit('peer_exchange', peerEx)
-	//{added : [peer1, peer2, ... ], added6 : [], ...}
-
-}
-
-Peer.prototype.PeerExchange = function (peerInfos, droppedPeerInfos) {
-
-	let peerExMsg = {  //strings or buffers ??
-		added : Buffer.from(peerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
-		added6 : Buffer.from(peerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
-		dropped : Buffer.from(droppedPeerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")),
-		dropped6 : Buffer.from(droppedPeerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
-		addedf : Buffer.concat( peerInfos.filter(peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.makeFlags() )),
-		added6f : Buffer.concat( peerInfos.filter(peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.makeFlags() ))
-	}
-
-	this.push(this.makeMsg([EXTENDED_MSG_TYPE, PPEEREX_MSG_TYPE], bencode(peerExMsg)))
-	
-}
-
 Peer.prototype.pPort = function (payload) {
 
-	let pPort = payload
-	this.nodePort = pPort
-	this.emit('DHT_port', pPort, this.hostIP)
+	//let pPort = payload
+	this.nodePort = payload
+	this.emit('DHT_port', pPort, this.host)
 
 }
 
@@ -394,8 +328,8 @@ Peer.prototype.pExHandShake = function(payload) {
 	this.fileMetaData.infoSize = metadata_size
 	this.m = m
 	this.pVersion = v
-	PPEEREX_MSG_TYPE = m['ut_pex']
-	PMETADATAEX_MSG_TYPE = m['ut_metadata']
+
+	this.supportedExtensions = m
 	
 }
 
@@ -403,12 +337,11 @@ Peer.prototype.exHandShake = function() {
 
 	let yourip = this.sock.address().address
 	if(this.sock.address().family == 'IPv4')
-		yourip = yourip.split('.')
+		yourip = yourip.split('.').join("")
 	else 
-		yourip = yourip.split(':')
+		yourip = yourip.split(':').join("")
 
-	let exHandShake = { m : {'ut_pex' : PEEREX_MSG_TYPE, 'ut_metadata' : METADATAEX_MSG_TYPE}, 
-	p : this.sock.address().port, v : this.version, yourip : yourip, reqq : 16 } 
+	let exHandShake = { m : this.recvExtensions, p : this.sock.address().port, v : this.version, yourip : yourip, reqq : 16 } 
 
 	let payload = benEncode(exHandShake)
 	this.push(this.makeMsg([EXTENDED_MSG_TYPE, EXTENDED_HANDSHAKE_MSG_TYPE], payload))
@@ -425,15 +358,15 @@ Peer.prototype.makeMsg = function(type, ...args) { // ...args = [int1, int2, buf
 	if(Array.isArray(type)) {
 		buf.writeUInt8(type[0], 4)
 		buf.writeUInt8(type[1], 4 + 1)
-		msglen ++
+		msglen++
 	} else {
 		buf = buf.slice(0,5).writeUInt8(type, 4)
 	}
 
-	msgLen += 1 + args.map(arg => Number.isInteger(arg) ? 4 : arg.length).reduce((a,b) => a+b, 0)
+	msgLen += 1 + args.map(arg => Number.isInteger(arg) ? 4 : arg.length).reduce( (a,b) => a + b, 0 )
 	buf.writeUInt32BE(msglen, 0)
 
-	let argBuf = Buffer.concat(args.map(arg => Buffer.isBuffer(arg) ? arg : bufferFrom(arg)))
+	let argBuf = Buffer.concat(args.map( arg => Buffer.isBuffer(arg) ? arg : bufferFrom(arg)) )
 
 	return Buffer.concat([buf, argBuf])
 
@@ -470,12 +403,26 @@ Peer.prototype.unInterested = function() {
 Peer.prototype.have = function(pieceIndex) {
 
 	this.push(makeMsg(HAVE_MSG_TYPE, pieceIndex))
+	if(this.interested && this.pieces.difference(this.fileMetaData.pieces).size == 0) 
+		this.unInterested()
 
 }
 
 Peer.prototype.bitfield = function () {
 
-	this.push(makeBitFieldMsg(this.file.pieces))
+	let pieces = Array.from(this.file.pieces).sort()
+
+	let bitFieldLength = pieces % 8 == 0 ? pieces / 8 : ((pieces / 8) + 1)
+	
+	bitField = Buffer.alloc(bitFieldLength)
+
+	pieces.forEach(function(pieceIndex) {
+		var byte = bitField.readUInt32BE(pieceIndex / 8)
+		byte &= pieceIndex % 8
+		bitField.writeUInt32BE(byte)
+	}) 
+
+	this.push(this.makeMsg(BITFIELD_MSG_TYPE, bitField))
 
 }
 
@@ -488,22 +435,6 @@ Peer.prototype.request = function(index, begin, length) {
 Peer.prototype.cancel = function (index, begin, length) {
 
 	this.push(this.makeMsg(CANCEL_MSG_TYPE, index, begin, length))
-
-}
-
-Peer.prototype.makeBitFieldMsg = function(pieces) {
-
-	let bitFieldLength = pieces % 8 == 0 ? pieces / 8 : ((pieces / 8) + 1)
-	
-	bitField = Buffer.alloc(bitFieldLength)
-
-	this.pieces.forEach(function(pieceIndex) {
-		var byte = bitField.readUInt32BE(pieceIndex / 8)
-		byte &= pieceIndex % 8
-		bitField.writeUInt32BE(byte)
-	}) 
-
-	return this.push(this.makeMsg(BITFIELD_MSG_TYPE, bitField))
 
 }
 
@@ -520,36 +451,18 @@ Peer.prototype._write = function(obj, encoding, callback) {
 	let exType = obj.exType
 	let handler 
 
-	if(exType && exType != METADATAEX_MSG_TYPE) { //either handshake or peer exchange
+	if(exType) { //either handshake or peer exchange
 
 		handler = this.handler[type][exType]
-		//handler(obj.args)
+		handler(obj.args)
 
-	} else if(exType && exType == METADATAEX_MSG_TYPE) {
-
-		let msg_type = obj.payload.msg_type
-		handler = this.handler[type][exType][msg_type]
-		//handler(obj.args)
-
-	} else //reg msg 
+	} else {
 		handler = this.handler[type]
-
-	handler( ... Object.values(obj.args) )
+		handler( ... Object.values(obj.args) )
+	}
 	  //{type : _ , args : { _ }} or {type : _ , args : [ extype ,  payload]} 
 
 	callback()
-
-}
-
-function parsePeerContactInfosIP4(compactInfos) {
-
-	return compactInfos.match(/.{6}/).map(info => new PeerInfo( info.slice(4,6).readUInt16BE(), info.slice(0,4)) )
-
-}
-
-function parsePeerContactInfosIP6(compactInfos) {
-
-	return compactInfos.match(/.{18}/).map(info => new PeerInfo( info.slice(16,18).readUInt16BE(), info.slice(0,16)) )
 
 }
 
@@ -579,7 +492,7 @@ class BitTorrentMsgParser extends Transform {
 		
 		if(!msg.readUInt8(0) != 0x13
 			|| !msg.slice(1,20).toString() == 'BitTorrent protocol'
-			|| msg.slice(28,48) != this.file.infoHash) return {}
+			|| msg.slice(28,48) != this.file.infoHash) return 
 	
 		//only check extension supported by this client
 		let supportsExten = msg.readUInt8(24) & 0x10
@@ -733,7 +646,7 @@ class BitTorrentMsgParser extends Transform {
 		let payload = benDecode(msg.slice(1))
 		payload.data = msg.slice(payload.length)
 
-		return { extype : type, args : payload } //{extpe: _ , args : { _ , _ , data : ... }}
+		return { extype : type, args : payload } //{extype: _ , args : { _ , _ , data : ... }}
 
 	}
 

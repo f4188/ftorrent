@@ -91,7 +91,7 @@ UDPTracker.prototype.doAnnounce = async function(stats) {
 	}
 
 	try {
-		let connReq = _buildConnectReq(this.transactID, this.port, this.address
+		let connReq = _buildConnectReq(this.transactID, this.port, this.address)
 		connResp = await this._sendConnectRequest(connReq)
 		this.connectionID = connResp.getConnectID()
 	} catch (error) {
@@ -99,14 +99,14 @@ UDPTracker.prototype.doAnnounce = async function(stats) {
 	}
 
 	try {
-		let annReq = _buildAnnounceReq(this.transactID, this.port, this.address
-		annResp = await this._sendAnnounceRequest(annReq);
+		let annReq = _buildAnnounceReq(this.transactID, this.port, this.address)
+		annResp = await this._sendAnnounceRequest(annReq)
 		this.numLeechers = annResp.getNumLeechers()
 		this.numSeeders = annResp.getNumSeeders()
 
 		this.interval = annResp.getInterval()
 		this.canConnect = false
-		this.canConnectTimeout = setTimeout(()=> {this.canConnect = true}, this.interval) //seconds or ms ??
+		this.canConnectTimeout = setTimeout( ()=> { this.canConnect = true }, this.interval) //seconds or ms ??
 
 		this.peerList = annResp.getPeerList()
 	} catch (error) {
