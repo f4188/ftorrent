@@ -1,10 +1,44 @@
 
-module.exports = {
-	'Swarm' : Swarm,
-	'Downloader' : Downloader
-}
-
 net = require('net')
+
+//constants
+//outstanding requests per peer
+//number of outstanding requests
+//number of active pieces
+const NUM_REQUESTS_PER_PEER = 5
+const NUM_OUTSTANDING_REQS = 200
+const NUM_ACTIVE_PIECES = 12
+
+// peer requests = [{peer, ... }, ... ]
+// peer pieces = [ { - , pieceIndex}, ... ]
+
+var reqFreq = (arr, prop) => {
+
+	let freqs = arr.reduce( (freqs, elem) => {
+		if(freqs[elem[prop]]) {
+			freqs[elem[prop]] ++
+		} else {
+			freqs[elem[peer]] = 1
+		}
+	}, {})
+
+	Object.keys(freqs).forEach(key => {
+		freqs[key] /= arr.length
+	})
+
+	let freqArray = []
+
+	let keys = Object.keys(freq)
+
+	for(key in keys) {
+		freqArray.push({key : key, freq : freq[key]})
+	}
+
+	freqArray.sort( (kv1, kv2) => kv1.freq > kv2.freq ) //sort by smallest
+
+	return freqArray //remove freq
+
+}
 
 //currently connected peers
 class Swarm { //ip list
@@ -21,9 +55,9 @@ class Swarm { //ip list
 
 		this.listeners = {}
 
-		this.sockOpts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
+		var sockOpts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
 
-		this.UTPserver = uTP.createServer() // ...
+		//this.UTPserver = uTP.createServer() // ...
 
 		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 
@@ -89,35 +123,12 @@ class Swarm { //ip list
 
 		peers = this.peers
 
-		let freq = {}
+		//return this.byFreq(peers)
+		let have = this.fileMetaData.pieces.has
+		let peerPieceList = peers.map( peer => Array.from(peer.pieces).map({ peer : peer, pieceIndex : peers.pieces } ) )
+		let dontHavePieceList= peerPieceList.filter( peerPieces => !have(peerPieces.pieces) )
 
-		peers.reduce((peer, freq) => {
-			peer.pieces.forEach(piece => {
-				//if have piece skip
-				if(this.fileMetaData.pieces.has(piece))
-					return
-				if(freq[piece])
-					freq[piece]++
-				else 
-					freq[piece] = 1
-			})
-			return freq
-		}, freq)
-
-		Object.keys(freq).forEach(key => {
-			freq[key] /= peers.length
-		})
-
-		//return freq
-		let freqArray
-
-		let keys = Object.keys(freq)
-		keys.sort()
-		for(key in keys) {
-			freqArray.push(index)
-		}
-
-		return  freqArray
+		return byFreq(dontHavePieceList, 'pieceIndex').map( kv => kv.key )
 
 	}
 
@@ -129,6 +140,7 @@ class Swarm { //ip list
 		return pieces
 	}
 
+	//set of peers that have index piece
 	havePiece(index, peers) {
 		peers = peers || NSet(this.peers)
 		return NSet(Array.from(peers).filter( peer => peer.pieces.have(index)))
@@ -198,9 +210,12 @@ function Downloader() { //extends eventEmitter
 	this.peerID 
 	this.port
 
+	this.activePieces = new Set()
+
 	this.announceUrlList = []
 
 	this.fileMetaData = {
+		'activePieces' : this.activePieces,
 		'announceUrlList' : [],
 		'date' : "", 
 		'infoHash' : null,
@@ -218,10 +233,12 @@ function Downloader() { //extends eventEmitter
 	this.pieces = new Map()
 
 	this.stats = {
+
 		get downloaded() { return this.pieces.has(file.numPieces - 1) ? (file.pieces.size - 1) * file.pieceLength +  file.fileLength % file.pieceLength : file.pieces.size * file.pieceLength },
 		get left() { return file.fileLength - this.stats.downloaded} ,
 		get uploaded() {  },
 		'ev': null //???
+
 	}
 
 	this.swarm = new Swarm(this.fileMetaData)	
@@ -229,27 +246,34 @@ function Downloader() { //extends eventEmitter
 	this.swarm.listeners = {
 
 		'peer_request' : (index, begin, length, peer) => {  //fulfill requests when they come in
-			let start = index * piece_length + begin
-			let end = index * piece_length + begin + length
+
+			let start = index * piece_length + begin, end = index * piece_length + begin + length
 			let piece = fs.createReadStream(this.path, {'start': start, 'end' : end})
+
 			piece.on('readable', () => {
 				let piece = pieceStream.read(length)
 				if(piece != null) 
 					peer.piece(index, begin, piece)
 			})
+
 		},
 
 		'peer_piece' : (index, begin, piecelet) => { 
+
 			let start = index * this.fileMetaData.pieceLength + begin
 			//fs.createWriteStream(this.path, {'start': start, 'mode':'r+'}).end(piece)
 			let piece = this.pieces.get(index)
 			piece.add(index, begin, piecelet)
-			if(piece.isComplete) {
-				piece.assemble()
-				this.fileMetaData.pieces.add(index)
-				this.swarm.havePiece(index)
-				this.emit('recieved_piece')
-			}
+
+			if(piece.isComplete && piece.assemble()) { //copy to disk		
+
+					this.activePieces.delete(piece)
+					this.fileMetaData.pieces.add(index)
+					this.swarm.havePiece(index)
+					this.requests = this.requests.filter( req => req.index == index && req.begin == begin && req.length == piecelet.length)
+					this.emit('recieved_piece') //call downloadPiece before downloadPiecelet
+
+			} 
 
 			this.emit('recieved_piecelet')
 			
@@ -297,7 +321,7 @@ Downloader.prototype.setupWithMagnetUri = function(magnetUri) {
 
 Downloader.prototype.checkDisk = function() {
 
-	let path  this.fileMetaData.name
+	//let path  this.fileMetaData.name
 
 	if(fs.existsSync(path)) {
 		metaInfo = benDecode(fs.readFileSync(path))
@@ -306,11 +330,10 @@ Downloader.prototype.checkDisk = function() {
 }
 
 //start or resume download or seed
-Downloader.prototype.start = function() {
+Downloader.prototype.start = async function() {
+
 	//read torrent file or parse magnet link
 	
-
-
 	//on startup check disk
 	//if file complete, verify, then seed
 	//if file incomplete, verify pieces, begin leeching
@@ -326,7 +349,8 @@ Downloader.prototype.start = function() {
 	//setup swarm
 	if(!this.fileMetaData.announceUrlList) { //dht announce
 
-		peers = dht.announce(this.fileMetaData.infoHash)
+		//peers = dht.announce(this.fileMetaData.infoHash)
+		this.DHTAnnounce()
 		
 	} else { 
 		
@@ -340,8 +364,6 @@ Downloader.prototype.start = function() {
 	if(!peers) {
 		//oh shit
 	}
-
-
 
 	this.swarm.connectPeers(peers)
 
@@ -422,7 +444,6 @@ Downloader.prototype.start = function() {
 
 		//prune connections
 
-
 	}
 
 	var optUnchokeLoop = () => {
@@ -435,7 +456,7 @@ Downloader.prototype.start = function() {
 	//piece downloader
 	var downloadPiece = () => {
 
-		peers = this.swarm.amUnchokedPeers()
+		peers = this.swarm.amUnchokedPeers.intersection(this.swarm.amInterestedPeers)
 		//get resend requests sent to peers that are now choked
 
 		this.hist = this.swarm.piecesByFreq(peers) //assume peers are representative
@@ -451,66 +472,72 @@ Downloader.prototype.start = function() {
 
 	}
 
-	var	downloadPiecelet = () => {
+	var	downloadPiecelets = () => {
 
-		let swarm = this.swarm
-		let requests = this.requests
-		let peers = swarm.amUnchokedPeers
-		let idle = peers.intersection(swarm.idlePeers)
-		let active = peers.difference(idle)
+		let swarm = this.swarm, requests = this.requests, peers = swarm.amUnchokedPeers.intersection(swarm.amInterestedPeers)
+		
+		this.requests.filter( request => request.peer.pChoke ).map( req => clearTimeout(req.timeout) )
+		this.requests.filter( request => request.peer.pChoke || request.timeout._called ).forEach( req => req.putBack(req) )
 
-		var reqToRandomPeer = (function(index, start, length) {
-			let havePiece = swarm.havePiece(index, peers)
-			let randomPeer = Array.from(havePiece)[Math.floor(Math.random() * havePiece.size)]		
-			let req = { index : index, begin : start, length : length, peer : randomPeer}
-			req.timeout = setTimeout(()=>{ this.emit('request_timeout') }, 30 * 1e3)
-			this.requests.push(req)
-			randomPeer.request(start, begin, length)
-		}).bind(this)
-
-		//constants
-		//outstanding requests per peer
-		//number of outstanding requests
-		//number of active pieces
-
-		let resendReq = this.requests.filter( request => request.peer.pChoke || request.timeout._called )
 		this.requests = this.requests.filter( request => !request.peer.pChoke && !request.timeout_called )
 
-		while(this.requests.length < peers.size * 4 || resendReq.length > 0) {
+		var reqToPeer = (( peer, req ) => {
+
+			req.timeout = setTimeout(()=>{ this.emit('request_timeout') }, 30 * 1e3)
+			this.requests.push(req)
+
+			peer.request(start, begin, length)
+
+		}).bind(this)
+
+		var randReqToPeer = ((peer) => {
+
+			let pieceletReq, randomIndex, piece
+			let iters = 0
+
+			let pieces = peer.pieces.intersection(this.activePieces) //swarm.pieces(peers)
+
+			do { //randomly select piece, get piecelet or if no piecelet then repeat
+
+				randomIndex = Math.floor(Math.random() * pieces.size) //maybe favour pieces that idle peers have ??
+				piece = Array.from(pieces)[randomIndex]
+
+				pieceletReq = piece.randPieceletReq()
+				iters++
+
+			} while (!pieceletReq && iters < this.activePieces.size) //fix infinite loop
+
+			if(iters < this.activePieces.size) //no more piecelets left
+				reqToPeer( peer, pieceletReq )
+
+			return iters < this.activePieces.size
+
+		}).bind(this)
+
+		//always interested in these peers
+		while(this.requests.length < peers.size * 4 && peers.size > 0) {
+	
+			//randomly select peer - more heavily weight idle peers
+			let freqArr = reqFreq(this.requests, 'peer')
+			//remove peers with more than x reqs outstanding
+			freqArr = freqArray.filter( req => req.freq > 8 / this.requests.length )
 			
-			if(resendReq.length > 0) {
+			let rand = Math.random()
+			let randomPeer = Array.from(peers)[Math.floor(rand * rand * peers.size)]	
 
-				let req = resendReq.shift()
-				reqToRandomPeer(randomIndex, req.begin, req.length)
 
-			} else {
-				
-				let piecelet
-				let pieces = swarm.pieces(peers)
-				let randomIndex, piece
-
-				do {
-
-					randomIndex = Math.floor(Math.random() * pieces.size)
-					piece = Array.from(pieces)[randomIndex]
-
-					let nextPiecelet = piece.next
-					if(nextPiecelet)
-						piecelet = nextPiecelet
-
-				} (piecelet)
-
-				reqToRandomPeer(randomIndex, piecelet.start, piecelet.begin)
-
-			}
+			if( randReqToPeer(randomPeer) ) //no more piecelets
+				peers = peers.difference(NSet(randomPeer))
 
 		}
+
+		//enough outstanding requests or no piecelets for active pieces ...
 
 	}
 
 	this.on('recieved_piece', downloadPiece)
-	this.on('recieved_piecelet', downloadPiecelet)
-	this.on('request_timeout', downloadPiecelet)
+	this.on('recieved_piecelet', downloadPiecelets)
+	this.on('request_timeout', downloadPiecelets)
 
 	unchokeLoop()
 	this.downLoop = setInterval(unchokeLoop, 10 * 1e3)
@@ -519,7 +546,7 @@ Downloader.prototype.start = function() {
 	this.optLoop = setInterval(optUnchokeLoop, 30 * 1e3)
 
 	downloadPiece()
-	downloadPiecelet()
+	downloadPiecelets()
 
 }
 
@@ -552,4 +579,9 @@ Downloader.prototype.urlAnnounce = async function() {
 
 }
 
+
+module.exports = {
+	'Swarm' : Swarm,
+	'Downloader' : Downloader
+}
 

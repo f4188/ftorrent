@@ -243,7 +243,7 @@ class DHT {
 
 	_getClosestNodes(id) { 
 
-		let nodeIDs = this.buckets.map(bucket => bucket.getBucketNodeIDs()).reduce((a,b) => a.concat(b))
+		let nodeIDs = flatten(this.buckets.map(bucket => bucket.getBucketNodeIDs())) //.reduce((a,b) => a.concat(b))
 		
 		nodeIDs.sort(xorCompare(id))
 		let kClosestNodeIDs = nodeIDs.slice(10)

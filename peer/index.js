@@ -219,7 +219,9 @@ Peer.prototype.pUninterested = function() {
 
 Peer.prototype.updateInterested = function() {
 
-	if(!this.interested && this.pieces.difference(this.fileMetaData.pieces).size > 0)
+	let activePieces = this.fileMetaData.activePieces
+
+	if(!this.interested && this.pieces.intersection(activePieces).size > 0)
 		this.interested()
 
 }
@@ -233,7 +235,9 @@ Peer.prototype.pHave = function(pieceIndex) {
 
 Peer.prototype.pBitfield = function (pieceList) { 
 
-	pieceList.forEach( (function(pieceIndex) { this.pieces.add(pieceIndex) }).bind(this))
+	let pieces = this.pieces
+
+	pieceList.forEach( (pieceIndex) => { pieces.add(pieceIndex) } )
 	this.updateInterested()
 	
 	//is seeder ??
@@ -242,8 +246,8 @@ Peer.prototype.pBitfield = function (pieceList) {
 
 Peer.prototype.isSeeder = function() {
 
-	return this.pieces.size == this.fileMetaData.numPiece
-	
+	return this.pieces.size == this.fileMetaData.numPieces
+
 }
 
 Peer.prototype.pRequest = function(index, begin, length) { 
