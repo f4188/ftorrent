@@ -1,6 +1,7 @@
 
 module.exports = {
 	'Peer' : Peer
+	'Parser' : BitTorrentMsgParser
 }
 
 Duplex = require('stream').Duplex
@@ -60,7 +61,11 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	//restart on reconnect?
 	this.downloadRate = 0
 	this.uploadRate = 0
-	this.timeConnected = 0
+
+	this.uploadBytes = 0
+	this.uploadTime = 0
+
+	//this.timeConnected = 0
 	this.disconnects = 0
 
 	this.file = fileMetaData
@@ -97,12 +102,14 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 		self.state = this.STATES.disconnected
 		//clearout request queues
+		this.emit('sock_closed', this)
 
 	})
 
 	sock.on('error', () => {
 
 		self.state = this.STATES.disconnected
+		this.emit('sock_closed', this)
 
 	})
 
@@ -111,6 +118,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	this.parser = new BitTorrentMsgParser
 
 	sock.pipe(this.parser, opts).pipe(this).pipe(sock)
+	sock.resume()
 
 	this.msgHandlers = { 'handshake': this.pHandshake, [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
 		[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
@@ -178,7 +186,7 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 
 		this.state = this.STATES.connected
 		this.handshake()
-		this.emit('connected')
+		this.emit('connected', this)
 
 	}
 
@@ -269,11 +277,11 @@ Peer.prototype.fulfillRequest = function() {
 
 }
 
-Peer.prototype.pPiece = function (index, begin, piece) { //index, begin, length, piece
+Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, begin, length, piece
 
 	if(this.pChoke) return //discard piece
 
-	this.emit('peer_piece', index, begin, length, piece)
+	this.emit('peer_piece', index, begin, length, piece, this, uploadTime)
 
 }
 
@@ -483,6 +491,9 @@ class BitTorrentMsgParser extends Transform {
 		this.msgBuffer = Buffer.alloc(0);
 		this.nextMsgLength = HANDSHAKE_LENGTH;
 		this.nextMsgParser = parseHandShake; //initially
+		this.recievingPiece = false
+		this.recvPieceStart = null
+		this.uploadTime = null
 
 	}
 
@@ -528,7 +539,7 @@ class BitTorrentMsgParser extends Transform {
 
 	}
 	
-	parseMsgPayLoad(msg) { //maybe garbled
+	parseMsgPayLoad(msg, uploadTime) { //maybe garbled
 
 		//this.keepAliveTimer goes off if no message for _ min/sec
 		//checks if nothing going in the other direction
@@ -556,7 +567,7 @@ class BitTorrentMsgParser extends Transform {
 				parsedMsg.args = parseRequestMsg(msg)
 				break
 			case PIECE_MSG_TYPE :  
-				parsedMsg.args = parsePieceMsg(msg)
+				parsedMsg.args = parsePieceMsg(msg, upLoadTime)
 				break
 			case CANCEL_MSG_TYPE : 
 				parsedMsg.args = parseCancelMsg(msg)
@@ -632,13 +643,13 @@ class BitTorrentMsgParser extends Transform {
 
 	}
 
-	parsePieceMsg(msg) {
+	parsePieceMsg(msg, upLoadTime) {
 
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
 		
 		if(index < this.file.numPieces && begin > 0 && begin < this.file.pieceLength) {
-			return { index : index, begin : begin, piece : msg.slice(8) }
+			return { index : index, begin : begin, piece : msg.slice(8), uploadTime : uploadTime }
 		}
 
 	}	
@@ -658,6 +669,8 @@ class BitTorrentMsgParser extends Transform {
 	//recvPiece true for this time
 	_transform(chunk, encoding, callback) {
 
+		let wasRecvPiece = this.recievingPiece
+		let uploadTime = null
 		this.msgBuffer = Buffer.concat(this.msgBuffer, chunk)
 
 		var nextMsg
@@ -667,11 +680,17 @@ class BitTorrentMsgParser extends Transform {
 			nextMsg = msgBuffer.slice(0,this.nextMsgLength)
 			this.msgBuffer = msgBuffer.slice(this.nextMsgLength)
 
-			this.nextMsgParser(nextMsg)
+			if(this.recievingPiece) 
+				upLoadTime == Date.now() - this.recvPieceStart
+
+			this.nextMsgParser(nextMsg, upLoadTime)
 
 	 	}
 
 	 	this.recievingPiece = this.msgBuffer.length > 4 && this.msgBuffer.readUInt8(4) == PIECE_MSG_TYPE
+	 	if(!wasRecvPiece && this.recievingPiece) {
+	 		this.recvPieceStart = Date.now()
+	 	} 
 	
 	}
 

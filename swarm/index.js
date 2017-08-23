@@ -1,6 +1,11 @@
 
 net = require('net')
 
+benDecode = require('bencode').decode 
+benEncode = require('bencode').encode
+
+const UDPTracker = require('../tracker/index.js').UDPTracker
+
 //constants
 //outstanding requests per peer
 //number of outstanding requests
@@ -8,6 +13,7 @@ net = require('net')
 const NUM_REQUESTS_PER_PEER = 5
 const NUM_OUTSTANDING_REQS = 200
 const NUM_ACTIVE_PIECES = 12
+const NUM_CONNECTIONS = 50
 
 // peer requests = [{peer, ... }, ... ]
 // peer pieces = [ { - , pieceIndex}, ... ]
@@ -45,6 +51,7 @@ class Swarm { //ip list
 
 	constructor(fileMetaData) {
 
+		this.peerIDs = new Map()
 		this.peers = []
 		this.optPeers = []
 		
@@ -62,7 +69,7 @@ class Swarm { //ip list
 		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 
 			let peer = new Peer(this.fileMetaData, this.listeners, sock) //peer owns socket
-			
+
 			self = this
 
 			peer.on('connected', () => {
@@ -206,11 +213,12 @@ class Swarm { //ip list
 
 function Downloader() { //extends eventEmitter
 
-	this.pieces = new Set()
-	this.peerID 
+	//this.pieces = new Set()
+	this.peerID = crypto.randomBytes(20)
 	this.port
 
 	this.activePieces = new Set()
+	this.pieces = new Map()
 
 	this.announceUrlList = []
 
@@ -219,8 +227,10 @@ function Downloader() { //extends eventEmitter
 		'announceUrlList' : [],
 		'date' : "", 
 		'infoHash' : null,
-		'info' : null, //for metaDataExchange - must be buffer
-		'infoSize' : 0,
+		'raw' : null,
+		'metaInfoSize' : 0,
+		//'info' : null, //for metaDataExchange - must be buffer
+		//'infoSize' : 0,
 		'name' : "",
 		'pieceLength' : null,
 		'fileLength' : null, 
@@ -230,22 +240,40 @@ function Downloader() { //extends eventEmitter
 	}
 	
 	let file = this.fileMetaData
-	this.pieces = new Map()
+	
 
 	this.stats = {
 
 		get downloaded() { return this.pieces.has(file.numPieces - 1) ? (file.pieces.size - 1) * file.pieceLength +  file.fileLength % file.pieceLength : file.pieces.size * file.pieceLength },
 		get left() { return file.fileLength - this.stats.downloaded} ,
 		get uploaded() {  },
-		'ev': null //???
+		ev : 2 //???
 
 	}
 
 	this.swarm = new Swarm(this.fileMetaData)	
 
+
+
 	this.swarm.listeners = {
 
-		'peer_request' : (index, begin, length, peer) => {  //fulfill requests when they come in
+		'connected' : (( peer ) => {
+
+			let peerIDs = this.swarm.peerIDs, peerID = peer.peerID
+
+			if(!peerIDs.has(peerID)) 
+				peerIDs.set(peerID, {'uploadedTime' : 0, 'uploadBytes': 0, 'disconnects' : 0})
+
+		}).bind(this),
+
+		'disconnected' : (( peer ) => {
+
+			let peerStats = this.swarm.peerIDs.get(peer.peerID)
+			peerStats.disconnects++
+
+		}).bind(this),
+
+		'peer_request' : (index, begin, length, peer) => {  //fulfill all requests from unchoked peers
 
 			let start = index * piece_length + begin, end = index * piece_length + begin + length
 			let piece = fs.createReadStream(this.path, {'start': start, 'end' : end})
@@ -258,28 +286,38 @@ function Downloader() { //extends eventEmitter
 
 		},
 
-		'peer_piece' : (index, begin, piecelet) => { 
+		'peer_piece' : ((index, begin, piecelet, peer, uploadTime) => { 
 
 			let start = index * this.fileMetaData.pieceLength + begin
-			//fs.createWriteStream(this.path, {'start': start, 'mode':'r+'}).end(piece)
 			let piece = this.pieces.get(index)
 			piece.add(index, begin, piecelet)
 
+			let peerStats = this.swarm.peerIDs.get(peer.peerID)
+			peerStats.uploadTime += uploadTime
+			peerStats.uploadBytes += piecelet.length
+
+			this.requests = this.requests.filter( req => req.index == index && req.begin == begin && req.length == piecelet.length)
+
 			if(piece.isComplete && piece.assemble()) { //copy to disk		
 
-					this.activePieces.delete(piece)
-					this.fileMetaData.pieces.add(index)
-					this.swarm.havePiece(index)
-					this.requests = this.requests.filter( req => req.index == index && req.begin == begin && req.length == piecelet.length)
-					this.emit('recieved_piece') //call downloadPiece before downloadPiecelet
+				this.activePieces.delete(piece)
+				this.fileMetaData.pieces.add(index)
+				this.swarm.havePiece(index)
+								
+				if(this.pieces.size == this.file.numPieces) {
+					//done
+					//begin seeding
+					return
+				}				
+
+				this.pieces.set(index, null)
+				this.emit('recieved_piece') //call downloadPiece before downloadPiecelet
 
 			} 
 
 			this.emit('recieved_piecelet')
-			
-			//this.pieces.push(index)
-		
-		} 
+					
+		}).bind(this)
 
 	}
 
@@ -289,25 +327,42 @@ Downloader.prototype.setupWithMetaInfoFile = function (metaInfoFilePath) {
 	
 	let metaInfo
 	if(fs.existsSync(metaInfoFilePath))
-		metaInfo = benDecode(fs.readFileSync(metaInfoFilePath))
+		metaInfo = fs.readFileSync(metaInfoFilePath)
 	else 
 		return
 
-	let {announceUrlList, date, info} = metaInfo
+	let {announce, info} = benDecode(metaInfo)
 
-	this.metaInfo 
+	//this.metaInfo 
 
 	let fileMetaData = this.fileMetaData
 
 	let m = info
 
-	fileMetaData.announceUrlList = announceUrlList
-	//fileMetaData.metaDataSize = null
-	fileMetaData.date = date
-	fileMetaData.name = m.name
-	fileMetaData.pieceLength = m.piece_length
+	fileMetaData.infoHash = crypto.createHash('sha1').update(metaInfo).digest('hex')
+	fileMetaData.metaInfoRaw = metaInfo
+	fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
+	fileMetaData.metaInfoSize = metaInfo.length
+	//fileMetaData.date = ['creation date']
+	fileMetaData.name = m.name.toString()
+	fileMetaData.pieceLength = m['piece length']
 	fileMetaData.fileLength = m.length
-	fileMetaData.pieceHashes = m.pieces.toString().match(/.{8}/) //string or buffer ???
+	fileMetaData.pieceHashes = m.pieces.toString().match(/.{8}/g) //string or buffer ???
+	fileMetaData.numPieces = Math.ceil(fileMetaData.fileLength / fileMetaData.pieceLength) 
+
+	this.path = "./" + fileMetaData.name
+
+	if(m.length) {
+		//single file
+		fileMetaData.isDirectory = false
+
+	} else if(m.files) {
+
+		fileMetaData.isDirectory = true
+		fileMetaData.fileList = m.files
+
+	}
+
 
 }
 
@@ -315,17 +370,77 @@ Downloader.prototype.setupWithMagnetUri = function(magnetUri) {
 
 	//use metaDataEx to acquire info 
 	//do announce and get peers
+	//parse uri
+	//get infohash
+	
+	fileMetaData.infoHash = infoHashj
 
 
 }
 
-Downloader.prototype.checkDisk = function() {
+Downloader.prototype.checkDisk = async function() {
+
+	if(!this.fileMetaData.isDirectory) {
+		return await this.checkFile(this.path, 0)
+	}
+
+}
+
+Downloader.prototype.checkFile = async function(path, offSet) {
 
 	//let path  this.fileMetaData.name
+	let size
+	let pieceLength = this.fileMetaData.pieceLength
 
-	if(fs.existsSync(path)) {
-		metaInfo = benDecode(fs.readFileSync(path))
-	} 
+	if(fs.existsSync(path))
+		size = await getFileStats(path)
+	
+	var readStreamFunc = async (pieceStream) => {
+
+		return new Promise( (resolve, reject) => {
+
+			pieceStream.on('readable', () => { 
+				let data = pieceStream.read(pieceLength)  
+				if(data)
+					resolve(data) 
+			})
+
+		})
+
+	}
+
+	let pieces = this.pieces// new Set()
+	let haveNumPieces = Math.floor(size / pieceLength)
+
+	let start = 0, end = pieceLength
+	let buf
+	let pieceIndex = 0
+	
+	while(pieceIndex < haveNumPieces) {
+
+		let pieceStream = fs.createReadStream(path, {start : start , end : end})
+		
+		buf = await readStreamFunc(pieceStream)
+
+		let hash = crypto.createHash('sha1').update(buf).digest('hex')
+		if(hash == this.fileMetaData.pieceHashes[pieceIndex + 0])
+			pieces.set(pieceIndex, null)
+
+		pieceIndex++
+		start += pieceLength
+		end += pieceLength
+
+	}
+
+	return this.pieces.size == this.fileMetaData.numPieces 
+
+}
+
+Downloader.prototype.getFileStats = function (path) {
+
+	return new Promise( (resolve, reject) => {
+		fs.stat(path, (stats) => resolve(stats))
+	})
 
 }
 
@@ -337,13 +452,9 @@ Downloader.prototype.start = async function() {
 	//on startup check disk
 	//if file complete, verify, then seed
 	//if file incomplete, verify pieces, begin leeching
-	this.seed = this.checkDisk()  //discard corrupt pieces
+	this.seed = await this.checkDisk(this.path, 0)  //discard corrupt pieces
 
-	//announce to trackers
-	//get peer lists
-	 //no peers
-	//this.peerLists = this.announce().map( x => x.peerList ) 
-	
+	console.log('Checked disk. Have file:', this.seed)
 	let peers
 	let resps 
 	//setup swarm
@@ -354,11 +465,15 @@ Downloader.prototype.start = async function() {
 		
 	} else { 
 		
-		while(!peers) {
+		//while(!peers) {
+			console.log('announcing')
 			resps = this.urlAnnounce()
-			peers = await Promise.race(resps)
-			peers = peers.peerList
-		}
+			
+			peers = await Promise.all(resps)
+
+
+			peers = peers[0].peerList
+		//}
 	} 
 
 	if(!peers) {
@@ -366,16 +481,6 @@ Downloader.prototype.start = async function() {
 	}
 
 	this.swarm.connectPeers(peers)
-
-	//wait for new peers
-	
-	//which peers to send interested msg to
-	//which peers to unchoke
-	//which requests to send
-
-	//this.pieceQueue = []
-
-	//chose peers to unchoke - every 10 sec
 
 	var unchokeLoop = () => {
 
@@ -413,7 +518,14 @@ Downloader.prototype.start = async function() {
 
 		let amUnchoked = mutuallyInterestedPeers.intersection(swarm.amUnchokedPeers)
 	
-		let unchokeCandidates = Array.from(amUnchoked).sort( (p1, p2) => p1.uploadRate < p2.uploadRate )
+		let peerMap = this.swarm.peerIDs
+		let unchokeCandidates = Array.from(amUnchoked).sort( (p1, p2) => {
+
+			let p1Stats = peerMap.get(p1), p2Stats = peerMap.get(p2)
+
+			return (p1Stats.uploadBytes/p1Stats.uploadTime) < (p2Stats.uploadBytes/ p2Stats.uploadTime)
+
+		})
 
 		//chose best and unchoke
 		let numUnchoked = amUnchoked.size
@@ -453,7 +565,7 @@ Downloader.prototype.start = async function() {
 
 	}
 
-	//piece downloader
+	//piece downloader - only called when pieces available
 	var downloadPiece = () => {
 
 		peers = this.swarm.amUnchokedPeers.intersection(this.swarm.amInterestedPeers)
@@ -462,9 +574,10 @@ Downloader.prototype.start = async function() {
 		this.hist = this.swarm.piecesByFreq(peers) //assume peers are representative
 		//random from most freq and least freq
 		//update interested peers
-		while( this.activePieces < 10 ) {
+		while( this.activePieces < 10 || this.pieces.size < this.file.numPieces) {
 			let pIndex = this.hist(Math.floor(Math.pow(Math.random(), 3)))
-			this.activePieces.add(new Piece(pIndex))
+			if(!this.pieces.has(pIndex)) 
+				this.activePieces.add(new Piece(pIndex))
 		}
 
 		//download pieces from mutually unchoked peers in group (1) and amUnchoked peers in group (3)
@@ -559,22 +672,44 @@ Downloader.prototype.DHTAnnounce = async function() {
 Downloader.prototype.urlAnnounce = async function() {
 	//stats = {downloaded, left, uploaded, ev}
 	
-	let sock = dgram.createSocket('udp4').bind()
-	sock.on('listening') //tracker announce)
+	 //tracker announce)
+	 let sock = await this.getUDPSocket()
 
 	let infoHash = this.fileMetaData.infoHash
 	let peerID = this.peerID
 
-	return  this.fileMetaData.announceUrlList.map( async (announceUrl) => {		
+	return this.fileMetaData.announceUrlList.map( async (announceUrl) => {		
 
 		if(announceUrl.slice(0,6) == 'udp://') { //udp tracker			
 			let tracker = new UDPTracker(sock, announceUrl, infoHash, peerID)
-			return await tracker.doAnnounce(this.stats) 
+			//console.log(tracker)
+
+			try {
+				return await tracker.doAnnounce(this.stats, myIP) 
+			} catch (error) {
+				console.log(error.err)
+			}
+
+			return 
 
 		} else if (announceUrl.slice(0,7) == 'http://') {
 			let tracker = new HTTPTracker(sock, announceUrl, infoHash, peerID)
 			return await tracker.doAnnounce(this.stats)
 		}
+	})
+
+
+
+}
+
+Downloader.prototype.getUDPSocket = function(port) {
+
+	let sock = dgram.createSocket('udp4').bind()
+
+	return new Promise ( (resolve, reject) => {
+		
+		sock.on('listening', () => { resolve(sock) } )
+
 	})
 
 }

@@ -3,7 +3,8 @@
 //const parsedUri = require('magnet-uri').decode(magnetLink)
 
 module.exports = {
-	'announce' : announce
+	//'announce' : announce,
+	'UDPTracker' : UDPTracker
 }
 
 const dgram = require('dgram')
@@ -11,6 +12,39 @@ const randomBytes = require('crypto').randomBytes
 const dns = require('dns');
 
 const UDPRes = require('./UDPResponse.js')
+const AnnounceResp = UDPRes.AnnounceResp
+const RequestResp = UDPRes.RequestResp
+const Response = UDPRes.Response
+
+
+var getPort = function getPortFromURL(url) {
+	return parseInt(url.split(":")[2]);	
+}
+
+var getAddr = function getAddressFromURL(url) {
+	
+	const options = {
+		//family: 6,
+		all : false
+		//hints: dns.ADDRCONFIG | dns.V4MAPPED,
+	}
+
+
+	
+	return new Promise ((resolve ,reject) => {
+		dns.lookup(url, options, (err, address, family) => {
+			if(err) 
+				reject(err)
+			else 
+				resolve(address)
+		})
+	})
+// addresses: [{"address":"2606:2800:220:1:248:1893:25c8:1946","family":6}]
+}
+
+
+
+
 
 function HTTPTracker() {
 	
@@ -21,14 +55,17 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	this.canConnect = true 
 	this.canConnectTimeout
 
-	this.announce = url
+	const URL = require('url').URL
+	var host = new URL(url)
+
+	this.announce = host.hostname
 	this.infoHash = infoHash
-	this.port = getPortFromUrl(url)
+	this.port = getPort(url)
 	this.peerID = peerID
 	this.stats = null
 
 	//filled by tracker on announce
-	this.address = null
+	this.address = net.isIP(this.announce) ? this.announce : null
 	this.numLeechers = null,
 	this.numSeeders = null,
 	this.interval = null,
@@ -42,75 +79,103 @@ function UDPTracker(sock, url, infoHash, peerID) {
 }
 
 UDPTracker.prototype._sendAnnounceRequest = function(request) {
+
 	return new Promise( (resolve, reject) => {
-		let timeout = setTimeout(this.timeoutInterval, () => reject('timeout'))
+
+		let timeout = setTimeout(() => { reject('timeout') } , this.timeoutInterval)
 		this.client.once('message', (msg, rsinfo) => {
-			clearTimeout(timeout)
-			if( Response(msg).getAction() == UDPRes.ANNOUNCE_ACTION)	
-				let resp = AnnounceResp(msg)
+			
+			if( new Response(msg).getAction() == UDPRes.ANNOUNCE_ACTION) {
+
+				clearTimeout(timeout)
+				let resp = new AnnounceResp(msg)
 				if(resp.isValid(this.transactID)) 
 					resolve(resp)
+				else
+					reject("invalid message")
+
 			}
-			reject("invalid message")
-		}
-		this.client.send(request)
-	}
+			
+		})
+
+		this.client.send(request, this.port, this.address)
+
+	} )
 }
 	
 UDPTracker.prototype._sendConnectRequest = function(request) {
+
 	return new Promise( (resolve, reject) => {
-		let timeout = setTimeout(this.timeoutInterval, () => reject('timeout'))
+
+		let timeout = setTimeout( () => { reject('timeout') } , this.timeoutInterval)
+
 		this.client.once('message', (msg, rsinfo) => {
-			clearTimeout(timeout)
-			if( Response(msg).getAction() == UDPRes.CONNECT_ACTION) {
-				let resp = RequestResp(msg); 
+		
+			if( new Response(msg).getAction() == UDPRes.CONNECT_ACTION) {
+
+				clearTimeout(timeout)
+				let resp = new RequestResp(msg); 
 				if(resp.isValid(this.transactID)) 
 					resolve(resp)
+				else
+					reject('invalid message')
 			} 
-			reject('invalid message')
-		}
-		this.client.send(request);
-	}
+
+		})
+
+		console.log(request)
+		this.client.send(request, this.port, this.address)
+
+	})
+
 }
 
-UDPTracker.prototype.doAnnounce = async function(stats) {
+UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
+
+	this.stats = stats
+	this.myIP = myIP
 
 	if(!this.canConnect) throw Error('to soon to connect')
 	this.stats = stats
 
-	client.on('error', (err) => {
+	this.client.on('error', (err) => {
 		console.log("oops: ${err.stack}"); 
 	});
 	
 	this.transactID = randomBytes(4);
 
-	try {
-		this.address = await getAddressFromURL(announceUrl)
-	} catch (error) {
-
-	}
+	
+	if(!this.address)
+		this.address = await getAddr(this.announce)
 
 	try {
-		let connReq = _buildConnectReq(this.transactID, this.port, this.address)
+
+		let connReq = this._buildConnectReq()
 		connResp = await this._sendConnectRequest(connReq)
-		this.connectionID = connResp.getConnectID()
-	} catch (error) {
+		console.log(connResp)
+		this.connectID = connResp.getConnectID()
 
+		/*
+	} catch (error) {
+		console.log(error)
 	}
 
-	try {
-		let annReq = _buildAnnounceReq(this.transactID, this.port, this.address)
+	try {*/
+
+		let annReq = this._buildAnnounceReq()
 		annResp = await this._sendAnnounceRequest(annReq)
 		this.numLeechers = annResp.getNumLeechers()
 		this.numSeeders = annResp.getNumSeeders()
 
 		this.interval = annResp.getInterval()
 		this.canConnect = false
-		this.canConnectTimeout = setTimeout( ()=> { this.canConnect = true }, this.interval) //seconds or ms ??
+		this.canConnectTimeout = setTimeout( (()=> { this.canConnect = true }).bind(this), this.interval) //seconds or ms ??
 
 		this.peerList = annResp.getPeerList()
-	} catch (error) {
+		//console.log(this.peerList)
 
+	} catch (error) {
+		console.log(error)
 	}
 
 	return { 
@@ -119,59 +184,44 @@ UDPTracker.prototype.doAnnounce = async function(stats) {
 		'interval' : this.interval,
 		'peerList' : this.peerList
 	}
+
 }
 
-UDPTracker.prototype = _buildConnectReq() {
+
+UDPTracker.prototype._buildConnectReq = function() {
 	var buf = new Buffer(16)
-	buf.writeUIntBE(0x41727101980, 0, 8)
-	buf.writeUInt32BE(0x0)
-	buf.writeUInt32BE(this.transactID)
+	Buffer.from([0x0, 0x0, 0x4, 0x17, 0x27, 0x10, 0x19, 0x80]).copy(buf, 0, 0, 8)
+	buf.writeUInt32BE(0x0, 8)
+	this.transactID.copy(buf, 12, 0, 4)
 	return buf
 }
 
-UDPTracker.prototype = _buildAnnounceReq() {
+UDPTracker.prototype._buildAnnounceReq = function() {
 	var key
 	var buf = new Buffer(98);
 	var ip = 0;
-	numWant |= -1;
-	buf.writeUIntBE(this.connectID)
-	buf.writeUInt32BE(UDPRes.CONNECT_ACTION);
-	buf.writeUInt32BE(this.transactID)
-	buf.writeUIntBE(this.infoHash, 16, 20)
-	buf.writeUIntBE(this.peerID, 36, 20)
-	buf.writeUIntBE(this.stats.downloaded, 56, 8)
-	buf.writeUIntBE(this.stats.left, 64, 8);
-	buf.writeUIntBE(this.stats.uploaded, 72, 8)
-	buf.writeUInt32BE(this.stats.ev);
-	buf.writeUInt32BE(ip);
-	buf.writeUInt32BE(key) //?
-	buf.writeUInt32BE(numWant)
-	buf.writeUInt16BE(this.port)
+	var numWant = -1;
+	this.connectID.copy(buf, 0, 0, 8)
+	buf.writeUInt32BE(UDPRes.ANNOUNCE_ACTION, 8)
+	this.transactID.copy(buf, 12, 0, 4)
+	this.infoHash.copy(buf, 16, 0, 20)
+	this.peerID.copy(buf, 36, 0, 20)
+
+	buf.writeUInt32BE(this.stats.downloaded % 2**32, 56)
+	buf.writeUInt32BE(Math.floor(this.stats.downloaded / 2**32), 56 + 4)
+
+	buf.writeUInt32BE(this.stats.left % 2**32, 64)
+	buf.writeUInt32BE(Math.floor(this.stats.left / 2**32), 64 + 4);
+
+	buf.writeUInt32BE(this.stats.uploaded % 2**32, 72)
+	buf.writeUInt32BE(Math.floor(this.stats.uploaded) / 2**32, 72 + 4)
+
+	buf.writeUInt32BE(this.stats.ev, 80); //event - 0:none, 1:complete, 2:started, 3:stopped
+
+	buf.writeUInt32BE(ip, 84);
+	buf.writeUInt32BE(key, 88) //?
+	buf.writeInt32BE(numWant, 92)
+	buf.writeUInt16BE(this.myIP , 96)
 	return buf;
 }
-
-
-var getPort = function getPortFromURL(url) {
-	return parseInt(url.split(":")[2]);	
-}
-
-var getAddr = function getAddressFromURL(url) {
-	
-	const options = {
-		//family: 6,
-		options.all = false;
-		//hints: dns.ADDRCONFIG | dns.V4MAPPED,
-	}
-	
-	return new Promise ((resolve ,reject) => {
-		dns.lookup(url, options, (err, address, family) => {
-			if(err) 
-				reject(err)
-			else 
-				resolve(address)
-		})
-	})
-// addresses: [{"address":"2606:2800:220:1:248:1893:25c8:1946","family":6}]
-}
-
 
