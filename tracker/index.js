@@ -123,7 +123,6 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 
 		})
 
-		console.log(request)
 		this.client.send(request, this.port, this.address)
 
 	})
@@ -152,7 +151,6 @@ UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
 
 		let connReq = this._buildConnectReq()
 		connResp = await this._sendConnectRequest(connReq)
-		console.log(connResp)
 		this.connectID = connResp.getConnectID()
 
 		/*
@@ -207,14 +205,15 @@ UDPTracker.prototype._buildAnnounceReq = function() {
 	this.infoHash.copy(buf, 16, 0, 20)
 	this.peerID.copy(buf, 36, 0, 20)
 
-	buf.writeUInt32BE(this.stats.downloaded % 2**32, 56)
-	buf.writeUInt32BE(Math.floor(this.stats.downloaded / 2**32), 56 + 4)
+	
+	buf.writeUInt32BE(Math.floor(this.stats.downloaded / 2**32), 56)
+	buf.writeUInt32BE(this.stats.downloaded % 2**32, 56 + 4)
 
-	buf.writeUInt32BE(this.stats.left % 2**32, 64)
-	buf.writeUInt32BE(Math.floor(this.stats.left / 2**32), 64 + 4);
+	buf.writeUInt32BE(Math.floor(this.stats.left / 2**32), 64 )
+	buf.writeUInt32BE(this.stats.left % 2**32, 64 + 4)
 
-	buf.writeUInt32BE(this.stats.uploaded % 2**32, 72)
-	buf.writeUInt32BE(Math.floor(this.stats.uploaded) / 2**32, 72 + 4)
+	buf.writeUInt32BE(Math.floor(this.stats.uploaded) / 2**32, 72)
+	buf.writeUInt32BE(this.stats.uploaded % 2**32, 72 + 4)
 
 	buf.writeUInt32BE(this.stats.ev, 80); //event - 0:none, 1:complete, 2:started, 3:stopped
 

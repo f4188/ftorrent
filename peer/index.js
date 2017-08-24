@@ -1,9 +1,4 @@
 
-module.exports = {
-	'Peer' : Peer
-	'Parser' : BitTorrentMsgParser
-}
-
 Duplex = require('stream').Duplex
 Transform = require('stream').Transform
 
@@ -45,6 +40,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	this.pChoke = true; //i'm choked
 	this.choke = true //peer is choked
+	this.optUnchoke = false //separate boolean
 	this.pInterested = false;
 	this.interested = false
 
@@ -86,10 +82,10 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		this.port = addr.port
 
 		let sockOpts = { 'allowHalfOpen' : false }
-		this.sock = net.createConnection(sockOpts)
-		sock.connect(addr.port, addr.host)
+		this.sock = new net.Socket(sockOpts)
+		this.sock.connect(addr.port, addr.host)
 
-		sock.on('connected', () => {	
+		this.sock.on('connected', () => {	
 
 			self.handshake()
 			self.state = this.STATES.sent_hshake
@@ -98,7 +94,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	}
 
-	sock.on('close', () => {
+	this.sock.on('close', () => {
 
 		self.state = this.STATES.disconnected
 		//clearout request queues
@@ -106,7 +102,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	})
 
-	sock.on('error', () => {
+	this.sock.on('error', () => {
 
 		self.state = this.STATES.disconnected
 		this.emit('sock_closed', this)
@@ -117,8 +113,8 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	this.parser = new BitTorrentMsgParser
 
-	sock.pipe(this.parser, opts).pipe(this).pipe(sock)
-	sock.resume()
+	this.sock.pipe(this.parser, opts).pipe(this).pipe(this.sock)
+	this.sock.resume()
 
 	this.msgHandlers = { 'handshake': this.pHandshake, [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
 		[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
@@ -134,7 +130,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 util.inherits(Peer, Duplex)
 
-Peer.prototype.piece = funcion(index, begin, piece) {
+Peer.prototype.piece = function(index, begin, piece) {
 
 	this.pause()
 	let p = new PassThrough() //set highwatermark
@@ -457,6 +453,8 @@ Peer.prototype._final = function() {
 
 }
 
+Peer.prototype._read = function() {}
+
 Peer.prototype._write = function(obj, encoding, callback) {
 
 	let type = obj.type
@@ -483,14 +481,14 @@ class BitTorrentMsgParser extends Transform {
 	constructor(file) {
 
 		//reader reads objects, writer writes buffers
-		opts = { readableObjectMode : true, highWaterMark : 16384 * 2 }
+		let opts = { readableObjectMode : true, highWaterMark : 16384 * 2 }
 
 		super(opts)
 
 		this.file = file
 		this.msgBuffer = Buffer.alloc(0);
 		this.nextMsgLength = HANDSHAKE_LENGTH;
-		this.nextMsgParser = parseHandShake; //initially
+		this.nextMsgParser = this.parseHandshake; //initially
 		this.recievingPiece = false
 		this.recvPieceStart = null
 		this.uploadTime = null
@@ -631,7 +629,7 @@ class BitTorrentMsgParser extends Transform {
 			return { index : index, begin : begin, length : length }
 	}
 
-	parseCancelMsg(index, begin, length) {
+	parseCancelMsg(msg) {
 
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
@@ -693,6 +691,14 @@ class BitTorrentMsgParser extends Transform {
 	 	} 
 	
 	}
+
+}
+
+
+module.exports = {
+
+	'Peer' : Peer,
+	'Parser' : BitTorrentMsgParser
 
 }
 
