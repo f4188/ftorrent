@@ -27,20 +27,22 @@ const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
 function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
-	opts = { 'readableObjectMode': true} //allowHalfOpen ??
-	Duplex.call(this)
+	opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
+	Duplex.call(this, opts)
 
 	this.uninitialized = true
 	this.connecting = false
 	this.connected = false
 	this.disconnected = false
 
-	this.STATES = {'uninitialized':0, 'sent_hshake' : 1,'connected':2, 'disconnected': 3}
+	this.STATES = { uninitialized : 0, sent_hshake : 1, connected : 2, disconnected : 3 }
+	//console.log(this.STATES)
 	this.state = this.STATES.uninitialized
 
 	this.pChoke = true; //i'm choked
 	this.choke = true //peer is choked
 	this.optUnchoke = false //separate boolean
+	//this.choke = !this.optUnchoke || this.normalChoke
 	this.pInterested = false;
 	this.interested = false
 
@@ -51,7 +53,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	
 	this.pieces = new NSet() //pHave and pBitfield
 	
-	this.peerID
+	this.peerID = fileMetaData.peerID
 
 	//statistics 
 	//restart on reconnect?
@@ -65,6 +67,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	this.disconnects = 0
 
 	this.file = fileMetaData
+	this.fileMetaData = fileMetaData
 
 	let self = this
 
@@ -78,6 +81,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	} else {
 
+		//console.log('connecting')
 		this.host = addr.host
 		this.port = addr.port
 
@@ -85,10 +89,10 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		this.sock = new net.Socket(sockOpts)
 		this.sock.connect(addr.port, addr.host)
 
-		this.sock.on('connected', () => {	
-
+		this.sock.on('connect', () => {	
+			//console.log('handshake')
 			self.handshake()
-			self.state = this.STATES.sent_hshake
+			self.state = self.STATES.sent_hshake
 
 		})
 
@@ -109,23 +113,28 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	})
 
-	var opts = {'end' : false}
+	
 
-	this.parser = new BitTorrentMsgParser
-
-	this.sock.pipe(this.parser, opts).pipe(this).pipe(this.sock)
-	this.sock.resume()
-
-	this.msgHandlers = { 'handshake': this.pHandshake, [KEEPALIVE_MSG_TYPE] : this.pKeepAlive, [CHOKE_MSG_TYPE] : this.pChoke, [UNCHOKE_MSG_TYPE] : this.pUnchoke, [INTERESTED_MSG_TYPE] : this.pInterested, 
-		[UNINTERESTED_MSG_TYPE] : this.pUninterested, [HAVE_MSG_TYPE] : this.pHave, [BITFIELD_MSG_TYPE] : this.pBitfield, 
-		[REQUEST_MSG_TYPE] : this.pRequests, [PIECE_MSG_TYPE] : this.pPiece, [CANCEL_MSG_TYPE] : this.pCancel, 
-		[DHT_PORT_MSG_TYPE] : this.pPort, [EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : this.pExHandShake }
+	this.msgHandlers = { 'handshake': (this.pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), [CHOKE_MSG_TYPE] : (this._pChoke).bind(this), [UNCHOKE_MSG_TYPE] : (this.pUnchoke).bind(this), [INTERESTED_MSG_TYPE] : (this._pInterested).bind(this), 
+		[UNINTERESTED_MSG_TYPE] : (this.pUninterested).bind(this), [HAVE_MSG_TYPE] : (this.pHave).bind(this), [BITFIELD_MSG_TYPE] : (this.pBitfield).bind(this), 
+		[REQUEST_MSG_TYPE] : (this.pRequest).bind(this), [PIECE_MSG_TYPE] : (this.pPiece).bind(this), [CANCEL_MSG_TYPE] : (this.pCancel).bind(this), 
+		[DHT_PORT_MSG_TYPE] : (this.pPort).bind(this), [EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : (this.pExHandShake).bind(this) }
 	}
+
 
 	this.pRequests = [] //serialize requests here so can cancel latter
 	this.pRequest = null
 
+	
+
+	var opts = {'end' : false}
+
+	this.parser = new BitTorrentMsgParser(this.fileMetaData)
 	this.idle = this.pRequest == null && !this.parser.recievingPiece
+
+	this.sock.pipe(this.parser, opts).pipe(this).pipe(this.sock)
+	this.sock.resume()
+
 }
 
 util.inherits(Peer, Duplex)
@@ -174,26 +183,27 @@ Peer.prototype.pKeepAlive = function () {
 
 Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 
+	console.log('recieved handshake', peerID)
 	this.peerID = peerID
 	this.supportsDHT = supportsDHT
 	this.supportsExten = supportsExten
+	//console.log()
 
-	if(this.state != this.STATES.sent_shake) { //already sent handshake
-
-		this.state = this.STATES.connected
+	//console.log(this.STATES)
+	if(this.state != this.STATES.sent_hshake) //already sent handshake
 		this.handshake()
-		this.emit('connected', this)
 
-	}
+	this.state = this.STATES.connected
+	this.emit('connected', this)
 
-	this.bitField()
+	this.bitfield()
 	this.exHandShake()
 
 	return true
 
 }
 
-Peer.prototype.pChoke = function () {
+Peer.prototype._pChoke = function () {
 
 	this.pChoke = true //kill all requests??
 	this.emit('peer_choked')
@@ -207,7 +217,7 @@ Peer.prototype.pUnchoke = function() {
 
 }
 
-Peer.prototype.pInterested = function() {
+Peer.prototype._pInterested = function() {
 
 	this.pInterested = true
 	this.emit('peer_interested')
@@ -302,13 +312,14 @@ Peer.prototype.handshake = function() {
 	let nt = new Buffer(1)
 	nt.writeUInt8(0x13)
 
-	let bitTorrent = Buffer.from('BitTorrent')
-
-	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.peerId])
+	let bitTorrent = Buffer.from('BitTorrent protocol')
+	//console.log([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.peerID])
+	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.peerID])
+	console.log('sending handshake', buf)
 
 	//only check extension supported by this client
-	buf.writeUInt8(buf.readUInt8(24) | 0x10) 
-	buf.writeUInt8(buf.readUInt8(27) | 0x01)
+	buf.writeUInt8(0x10, 24) 
+	buf.writeUInt8(0x01, 27)
 	this.push(buf)
 
 	this.exHandShake()
@@ -366,13 +377,14 @@ Peer.prototype.makeMsg = function(type, ...args) { // ...args = [int1, int2, buf
 	if(Array.isArray(type)) {
 		buf.writeUInt8(type[0], 4)
 		buf.writeUInt8(type[1], 4 + 1)
-		msglen++
+		msgLen++
 	} else {
-		buf = buf.slice(0,5).writeUInt8(type, 4)
+		buf = buf.slice(0,5)
+		buf.writeUInt8(type, 4)
 	}
 
 	msgLen += 1 + args.map(arg => Number.isInteger(arg) ? 4 : arg.length).reduce( (a,b) => a + b, 0 )
-	buf.writeUInt32BE(msglen, 0)
+	buf.writeUInt32BE(msgLen, 0)
 
 	let argBuf = Buffer.concat(args.map( arg => Buffer.isBuffer(arg) ? arg : bufferFrom(arg)) )
 
@@ -460,15 +472,19 @@ Peer.prototype._write = function(obj, encoding, callback) {
 	let type = obj.type
 	let exType = obj.exType
 	let handler 
+	
 
-	if(exType) { //either handshake or peer exchange
-
-		handler = this.handler[type][exType]
+	if(exType != undefined) { //either handshake or peer exchange
+	
+		handler = this.msgHandlers[type][exType]
 		handler(obj.args)
 
 	} else {
-		handler = this.handler[type]
+
+		handler = this.msgHandlers[type]
+		console.log(obj.args)
 		handler( ... Object.values(obj.args) )
+
 	}
 	  //{type : _ , args : { _ }} or {type : _ , args : [ extype ,  payload]} 
 
@@ -481,7 +497,7 @@ class BitTorrentMsgParser extends Transform {
 	constructor(file) {
 
 		//reader reads objects, writer writes buffers
-		let opts = { readableObjectMode : true, highWaterMark : 16384 * 2 }
+		let opts = { 'objectMode': true, 'writableObjectMode' : true, 'highWaterMark' : 16384 * 2 }
 
 		super(opts)
 
@@ -497,23 +513,31 @@ class BitTorrentMsgParser extends Transform {
 
 	getType(msg) {
 
-		return msg[0].readUInt8()
+		return msg.readUInt8(0)
 
 	}
 	
 	parseHandshake(msg) { //maybe garbled
+
+		console.log('handshake', msg)
+		console.log( msg.slice(28,48) , this.file.infoHash )
 		
-		if(!msg.readUInt8(0) != 0x13
-			|| !msg.slice(1,20).toString() == 'BitTorrent protocol'
-			|| msg.slice(28,48) != this.file.infoHash) return 
+		if(msg.readUInt8(0) != 0x13
+			|| msg.slice(1,20).toString() != 'BitTorrent protocol'
+			|| !msg.slice(28, 48).equals(this.file.infoHash)
+			|| msg.length != 68) return 
+		console.log("parsing handshake")
+
 	
+	
+
 		//only check extension supported by this client
 		let supportsExten = msg.readUInt8(24) & 0x10
 		let supportsDHT = msg.readUInt8(27) & 0x01 //last bit
 
 		let peerID = msg.slice(48,68)
 
-		this.nextMsgParser = parseMsgLength;
+		this.nextMsgParser = this.parseMsgLength;
 		this.nextMsgLength = 4;
 		//reset keepalive timer
 
@@ -526,7 +550,7 @@ class BitTorrentMsgParser extends Transform {
 		if(msg.readUInt32BE(0) > 0) { //handle keepalive
 
 			this.nextMsgLength = msg.readUInt32BE(0)
-			this.nextMsgParser = parseMsgPayLoad
+			this.nextMsgParser = this.parseMsgPayLoad
 
 		} else {
 
@@ -544,38 +568,38 @@ class BitTorrentMsgParser extends Transform {
 
 		let msgLen = this.nextMsgLength //assert(this.nextMsgLength == msg.length)
 
-		this.nextMsgParser = parseMsgLength;
+		this.nextMsgParser = this.parseMsgLength;
 		this.nextMsgLength = 4
 
 		//reset keepalive timer
 
-		let msgType = getType(msg) //string
+		let msgType = this.getType(msg) //string
 		msg = msg.slice(1)
 
 		let parsedMsg = { type : msgType, args : {} }
 
 		switch ( msgType ) {
 			case HAVE_MSG_TYPE :  
-				parsedMsg.args = parseHaveMsg(msg)
+				parsedMsg.args = this.parseHaveMsg(msg)
 				break
 			case BITFIELD_MSG_TYPE :  
-				parsedMsg.args = parseBitFieldMsg(msg)
+				parsedMsg.args = this.parseBitFieldMsg(msg)
 				break
 			case REQUEST_MSG_TYPE : 
-				parsedMsg.args = parseRequestMsg(msg)
+				parsedMsg.args = this.parseRequestMsg(msg)
 				break
 			case PIECE_MSG_TYPE :  
-				parsedMsg.args = parsePieceMsg(msg, upLoadTime)
+				parsedMsg.args = this.parsePieceMsg(msg, upLoadTime)
 				break
 			case CANCEL_MSG_TYPE : 
-				parsedMsg.args = parseCancelMsg(msg)
+				parsedMsg.args = this.parseCancelMsg(msg)
 				break
 			case DHT_PORT_MSG_TYPE :
 				if(msgLen == 2)
 					parsedMsg.args = msg.readUInt16BE()
 				break
 			case EXTENDED_MSG_TYPE : 
-				let {exType, args} = parseExtendedMsg()
+				let {exType, args} = this.parseExtendedMsg(msg)
 				parsedMsg.exType = exType
 				parsedMsg.args = args
 				break
@@ -585,7 +609,7 @@ class BitTorrentMsgParser extends Transform {
 				
 		}
 
-		if( parseMsg.args == undefined ) {
+		if( parsedMsg.args == undefined ) {
 			//something bad
 		}
 
@@ -609,12 +633,13 @@ class BitTorrentMsgParser extends Transform {
 
 		msg.forEach(function(byte, i, v) {
 
+			let j = 0
 			while(byte >>= 1) 
-				bitField.push(i++)
+				bitField.push(i * 8 + j++)
 
 		})
 
-		return bitField
+		return { bitField : bitField }
 
 	}
 
@@ -654,12 +679,12 @@ class BitTorrentMsgParser extends Transform {
 
 	parseExtendedMsg(msg) {
 
-		let type = msg[0].readUInt8()
+		let type = msg.readUInt8(0)
 		//benDecode must only parse longest valid bencoded string
 		let payload = benDecode(msg.slice(1))
 		payload.data = msg.slice(payload.length)
 
-		return { extype : type, args : payload } //{extype: _ , args : { _ , _ , data : ... }}
+		return { exType : type, args : payload } //{extype: _ , args : { _ , _ , data : ... }}
 
 	}
 
@@ -669,19 +694,19 @@ class BitTorrentMsgParser extends Transform {
 
 		let wasRecvPiece = this.recievingPiece
 		let uploadTime = null
-		this.msgBuffer = Buffer.concat(this.msgBuffer, chunk)
+		this.msgBuffer = Buffer.concat([this.msgBuffer, chunk])
 
 		var nextMsg
 
 		while(this.msgBuffer.length > this.nextMsgLength) {
 			
-			nextMsg = msgBuffer.slice(0,this.nextMsgLength)
-			this.msgBuffer = msgBuffer.slice(this.nextMsgLength)
+			nextMsg = this.msgBuffer.slice(0,this.nextMsgLength)
+			this.msgBuffer = this.msgBuffer.slice(this.nextMsgLength)
 
 			if(this.recievingPiece) 
-				upLoadTime == Date.now() - this.recvPieceStart
+				uploadTime == Date.now() - this.recvPieceStart
 
-			this.nextMsgParser(nextMsg, upLoadTime)
+			this.nextMsgParser(nextMsg, uploadTime)
 
 	 	}
 

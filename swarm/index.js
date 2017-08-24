@@ -53,9 +53,11 @@ var byFreq = (arr, prop) => {
 }
 
 //currently connected peers
-class Swarm { //ip list
+class Swarm extends EventEmitter { //ip list
 
 	constructor(fileMetaData, myIP, myPort) {
+
+		super()
 
 		this.peerIDs = new Map()
 		this.peers = []
@@ -73,18 +75,25 @@ class Swarm { //ip list
 		var sockOpts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
 
 		//this.UTPserver = uTP.createServer() // ...
+		let self = this
 
 		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
+			
+			//sock.remote.address, sock.remote.port
+			if(this.peers.some( peer => peer.addr.host == sock.remote.address && peer.addr.port == sock.remote.port ))
+				return
 
-			let peer = new Peer(this.fileMetaData, this.listeners, sock) //peer owns socket
+			console.log('got connection', self.myPort, sock.remotePort)
 
-			self = this
+			let peer = new Peer(this.fileMetaData, self.listeners, sock) //peer owns socket
 
 			peer.on('connected', () => {
 				self.emit('new_peer', peer)
 			})
 
 		}).listen(this.myPort)
+
+		this.on('new_peer', (peer) => self.peers.push(peer) )
 
 		//Object.defineProperty
 
@@ -102,35 +111,35 @@ class Swarm { //ip list
 
 			peer.on('connected', () => { //after recieving handshake
 				clearTimeout(timeout)
+				console.log('resolve peer')
 				resolve(peer) 
 			})
 			
-		} )
-	}
-
-	connectManyPeers (addrs) {
-
-		return addrs.map( (addr) => this.connectPeer(addr) )
-
+		})
 	}
 
 	addPeers (addrs) {
+		
 		console.log("Adding peers", addrs)
 
-		this.connectManyPeers( addrs ).forEach( async (promise) => {
+		//addrs.map( (addr) => this.connectPeer(addr) ).forEach( async (promise) => {
+		addrs.forEach( async addr => {
 
 			try {
 
-				peer = await promise
+				peer = await this.connectPeer(addr)
 				this.peers.push(peer)
 
 			} catch (error) {
+
 				console.log(error)
+
 			}
 			// do something
 			//if bad peer discard
 			//
 		})
+
 	}
 
 	newPeers () {
@@ -226,14 +235,14 @@ class Swarm { //ip list
 
 }
 
-function Downloader() { //extends eventEmitter
+function Downloader(myPort) { //extends eventEmitter
 
 	//this.pieces = new Set()
 
 	EventEmitter.call(this)
 
 	this.myIP = ""
-	this.myPort = 5000 //listen port for new peers
+	this.myPort = myPort //listen port for new peers
 	this.peerID = crypto.randomBytes(20)
 	this.port
 
@@ -243,6 +252,7 @@ function Downloader() { //extends eventEmitter
 	this.announceUrlList = []
 
 	this.fileMetaData = {
+		'peerID' : this.peerID,
 		'activePieces' : this.activePieces,
 		'announceUrlList' : [],
 		'date' : "", 
@@ -371,7 +381,7 @@ Downloader.prototype.setupWithMetaInfoFile = function (metaInfoFilePath) {
 	fileMetaData.name = m.name.toString()
 	fileMetaData.pieceLength = m['piece length']
 	fileMetaData.fileLength = m.length
-	fileMetaData.pieceHashes = m.pieces.toString().match(/.{8}/g) //string or buffer ???
+	fileMetaData.pieceHashes = m.pieces.toString('hex').match(/.{40}/g) //string or buffer ???
 	fileMetaData.numPieces = Math.ceil(fileMetaData.fileLength / fileMetaData.pieceLength) 
 
 	this.path = "./" + fileMetaData.name
@@ -413,13 +423,18 @@ Downloader.prototype.checkDisk = async function() {
 Downloader.prototype.checkFile = async function(path, offSet) {
 
 	//let path  this.fileMetaData.name
-	let size
+	let size, stats
 	let pieceLength = this.fileMetaData.pieceLength
+	let lastPieceLength = this.fileMetaData.fileLength % this.pieceLength
 
 	if(fs.existsSync(path))
-		size = await getFileStats(path)
+		stats = await this.getFileStats(path)
+
+	size = stats.size
 	
-	var readStreamFunc = async (pieceStream) => {
+	console.log('size', size)
+
+	var readStreamFunc = async (pieceStream, pieceLength) => {
 
 		return new Promise( (resolve, reject) => {
 
@@ -434,23 +449,25 @@ Downloader.prototype.checkFile = async function(path, offSet) {
 	}
 
 	let pieces = this.pieces// new Set()
-	let haveNumPieces = Math.floor(size / pieceLength)
+	let haveAtMostNumPieces = Math.ceil(size / pieceLength)
 
 	let start = 0, end = pieceLength
 	let buf
-	let pieceIndex = 0
 	
-	while(pieceIndex < haveNumPieces) {
-
+	for(let pieceIndex = 0; pieceIndex < haveAtMostNumPieces; pieceIndex++) {
+	
 		let pieceStream = fs.createReadStream(path, {start : start , end : end})
+		let pLength = pieceLength
+
+		if(pieceIndex == this.fileMetaData.numPieces - 1)
+			pLength = lastPieceLength
 		
-		buf = await readStreamFunc(pieceStream)
+		buf = await readStreamFunc(pieceStream, pLength)
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
 		if(hash == this.fileMetaData.pieceHashes[pieceIndex + 0])
 			pieces.set(pieceIndex, null)
 
-		pieceIndex++
 		start += pieceLength
 		end += pieceLength
 
@@ -463,7 +480,7 @@ Downloader.prototype.checkFile = async function(path, offSet) {
 Downloader.prototype.getFileStats = function (path) {
 
 	return new Promise( (resolve, reject) => {
-		fs.stat(path, (stats) => resolve(stats))
+		fs.stat(path, (err, stats) => resolve(stats))
 	})
 
 }
@@ -497,8 +514,8 @@ Downloader.prototype.start = async function() {
 			peers = await this.urlAnnounce()
 			
 			
-			peers = peers[0].peerList.slice(1)
-			console.log("peers", peers)
+			peers = peers[0].peerList.filter( elem => elem[1] != this.myPort )
+			console.log("peers", peers, this.myPort)
 
 		//}
 	} 
@@ -595,6 +612,10 @@ Downloader.prototype.start = async function() {
 
 	}
 
+	var seedLoop() => {
+
+	}
+
 	//piece downloader - only called when pieces available
 	var downloadPiece = () => {
 
@@ -680,9 +701,16 @@ Downloader.prototype.start = async function() {
 
 	}
 
+	if(this.seed) {
+		seedLoop()
+		this.sLoop = setInterval(seedLoop, 30 * 1e3)
+		return
+	}
+
+
 	this.on('recieved_piece', (downloadPiece).bind(this))
-	this.on('recieved_piecelet', downloadPiecelets)
-	this.on('request_timeout', downloadPiecelets)
+	this.on('recieved_piecelet', (downloadPiecelets).bind(this))
+	this.on('request_timeout', (downloadPiecelets).bind(this))
 
 	unchokeLoop()
 	this.downLoop = setInterval(unchokeLoop, 10 * 1e3)
@@ -692,7 +720,7 @@ Downloader.prototype.start = async function() {
 
 	downloadPiece()
 	downloadPiecelets()
-
+	
 }
 
 Downloader.prototype.DHTAnnounce = async function() {
