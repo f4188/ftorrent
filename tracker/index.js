@@ -28,8 +28,6 @@ var getAddr = function getAddressFromURL(url) {
 		all : false
 		//hints: dns.ADDRCONFIG | dns.V4MAPPED,
 	}
-
-
 	
 	return new Promise ((resolve ,reject) => {
 		dns.lookup(url, options, (err, address, family) => {
@@ -41,10 +39,6 @@ var getAddr = function getAddressFromURL(url) {
 	})
 // addresses: [{"address":"2606:2800:220:1:248:1893:25c8:1946","family":6}]
 }
-
-
-
-
 
 function HTTPTracker() {
 	
@@ -184,7 +178,6 @@ UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
 	}
 
 }
-
 
 UDPTracker.prototype._buildConnectReq = function() {
 	var buf = new Buffer(16)

@@ -1,6 +1,4 @@
 
-
-
 var Pieces = (file) => class Piece {
 
 	constructor(index) {
@@ -116,7 +114,7 @@ var Pieces = (file) => class Piece {
 		let hashValue = hash.update(buf).digest('hex')
 		if( hashValue == this.hash) { 
 
-			fs.createWriteStream(this.path, {'start': this.left, 'end' : this.right, highWaterMark : 2**15}).write(buf)
+			fs.createWriteStream(this.path, {'start': this.left, highWaterMark : 2**15}).write(buf) //, 'end' : this.right
 			return true
 		
 		} 

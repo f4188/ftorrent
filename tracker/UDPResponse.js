@@ -56,7 +56,7 @@ class AnnounceResp extends Response {
 		let addr, host, port
 
 		for(var i = 0; i < numAddrs; ++i ) {
-			
+
 			addr = this.rsp.slice(20 + i * 6, 20 + i * 6 + 6)
 			host = addr.slice(0,4).map(bytes => bytes.toString()).join('.')
 			port = addr.slice(4,6).readUInt16BE()
@@ -78,14 +78,14 @@ class AnnounceResp extends Response {
 		this.rsp.readUInt32BE(16)
 	}
 
-
 }
 
 module.exports = {
+
 	'AnnounceResp' : AnnounceResp,
 	'RequestResp' : RequestResp,
 	'Response' : Response,
-	//'getAction' : getAction,
 	'CONNECT_ACTION' : RESQUEST_ACTION,
 	'ANNOUNCE_ACTION' : ANNOUNCE_ACTION
+	
 }
