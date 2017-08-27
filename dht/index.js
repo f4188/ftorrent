@@ -1,14 +1,13 @@
 
-//need to replace
 dgram = require('dgram')
 crypto = require('crypto')
 xor = require('buffer-xor')
 
-Peer = require('../lib/peerinfo.js').PeerInfo
-NSet = require('../lib/NSet.js').NSet
-
 benDecode = require('bencode').decode
 benEncode = require('bencode').encode
+
+Peer = require('../lib/peerinfo.js').PeerInfo
+NSet = require('../lib/NSet.js').NSet
 
 const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
 
@@ -17,6 +16,7 @@ var flatten = (list) => list.reduce((a,b) => a.concat(b), [])
 //var	xorCompare = (id) => (nodeID1, nodeID2) => parseInt(xor(nodeID1 , id).toString('hex'), 16) > parseInt(xor(nodeID2 , id).toString('hex'), 16)
 var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1.nodeID, 'hex') , id).toString('hex'), 16) - parseInt(xor(new Buffer(node2.nodeID, 16) , id).toString('hex'), 16)
 var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor( new Buffer(node1, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16) - parseInt( xor(new Buffer(node2, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16)
+var	xorCompareIDStrings = (id) => (node1, node2) => parseInt(node1, 16) ^ parseInt(id, 16) - parseInt(node2, 16) ^ parseInt(id, 16)
 
 
 var makeNode
@@ -342,7 +342,8 @@ class DHT {
 					kClosestCount = 0
 				
 				kClosest = closestSoFar
-				allPeers = allPeers.concat(peers)
+				if(peers)
+					allPeers = allPeers.concat(peers)
 			
 				if(kClosestCount >= 8)
 					resolve([allPeers, kClosest]) //called only once
@@ -368,6 +369,7 @@ class DHT {
 
 				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
 				//if no nodes found and no nodes left silent exit
+				//if 8 silent fails then reject()
 
 			}
 
@@ -508,7 +510,18 @@ class DHT {
 
 	_recvRequest(msg, rinfo) {
 
-		let request = benDecode(msg) // return 203 if malformed
+		let request
+
+		try {
+
+			request = benDecode(msg) // return 203 if malformed
+
+		} catch (error) {
+
+			return
+
+		}
+
 		let response
 				
 		if(request.y == 'q') {
@@ -755,7 +768,7 @@ class Node {
 			let parsedHost = info.slice(0,4).toString('hex').match(/.{2}/g).map( num => Number('0x' + num)).join('.') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
 			let parsedPort = info.slice(4, 6).readUInt16BE()
 
-			return new Peer(parsedPort, parsedHost, nodeID.toString('hex'))
+			return new Peer(parsedPort, parsedHost)
 
 		})
 
@@ -859,7 +872,7 @@ class Node {
 	async getPeers(infoHash) {
 
 		let transactID = crypto.randomBytes(2)
-		let request = {'t': transactID, 'y':'q', 'q': 'get_peers', 'a' : {'id': Buffer.from(this.myNodeID,'hex'), 'info_hash':Buffer.from(infoHash,'hex')}}
+		let request = {'t': transactID, 'y':'q', 'q': 'get_peers', 'a' : {'id': Buffer.from(this.myNodeID,'hex'), 'info_hash' : Buffer.from(infoHash, 'hex')}}
 		let response
 		
 		try {
@@ -906,16 +919,28 @@ class Node {
 
 			let self = this
 
-			let timeout = setTimeout(()=>{
+			let timeout = setTimeout( ()=> {
+
 				self.sock.removeListener('message', listener)
-				reject(new TimeoutError('Timeout: ' + self.default_timeout +' (ms)'))
+				reject("Timeout: " + self.default_timeout + " (ms)")
+
 			} , this.default_timeout)
 
 			let listener = (msg, rinfo) => {
 				
-				let response = benDecode(msg)
+				let response
 
-				if(response.t.equals(request.t)) { //buffers
+				try {
+					
+					response = benDecode(msg)
+
+				} catch (error) {
+
+					return
+
+				}
+
+ 				if(response.t.equals(request.t)) { //buffers
 
 					clearTimeout(timeout)
 					self.sock.removeListener('message', listener)
@@ -931,6 +956,7 @@ class Node {
 						//maybe set bad
 
 				}
+
 			}
 
 			this.sock.on('message', listener)
