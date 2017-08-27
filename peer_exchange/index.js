@@ -42,12 +42,14 @@ let PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 			return
 
 		let peerExMsg = {  //strings or buffers ??
-			added : Buffer.from(peerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
-			added6 : Buffer.from(peerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
-			dropped : Buffer.from(droppedPeerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")),
-			dropped6 : Buffer.from(droppedPeerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join("")), 
+
+			added : peerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join(""), 
+			added6 : peerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join(""), 
+			dropped : droppedPeerInfos.filter( peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join(""),
+			dropped6 : droppedPeerInfos.filter( peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.getContactInfo() ).join(""), 
 			addedf : Buffer.concat( peerInfos.filter(peerInfo => !peerInfo.ipv6).map( peerInfo => peerInfo.makeFlags() )),
 			added6f : Buffer.concat( peerInfos.filter(peerInfo => peerInfo.ipv6).map( peerInfo => peerInfo.makeFlags() ))
+
 		}
 
 		this.push(this.makeMsg([EXTENDED_MSG_TYPE, this.supportsExtensions['ut_pex']], bencode(peerExMsg)))

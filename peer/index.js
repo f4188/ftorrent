@@ -29,6 +29,14 @@ const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 //var PPEEREX_MSG_TYPE
 //var PMETADATAEX_MSG_TYPE 
 
+/* from fileMetaData
+numPieces
+pieces set
+infoSize
+activespieces
+peerID
+*/
+
 function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
@@ -111,14 +119,16 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 		self.state = this.STATES.disconnected
 		//clearout request queues
-		this.emit('sock_closed', this)
+		//self.emit('sock_closed')
+		self.emit('disconnected')
 
 	})
 
 	this.sock.on('error', () => {
 
 		self.state = this.STATES.disconnected
-		this.emit('sock_closed', this)
+		//self.emit('sock_closed')
+		self.emit('disconnected')
 
 	})
 
@@ -141,7 +151,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	this.parser = new BitTorrentMsgParser(this.fileMetaData)
 	this.idle = this.pRequest == null && !this.parser.recievingPiece
-	//console.log('piping')
+
 	this.sock.pipe(this.parser, opts).pipe(this).pipe(this.sock)
 
 	//this.sock.on('data', (chunk) => {  })
@@ -169,7 +179,7 @@ Peer.prototype.piece = function(index, begin, piece) {
 		//p.unpipe(this.sock)
 		this.finishRequest() 
 		this.downloadTime += (Date.now() - this.sendPieceStart)
-		this.emit('piece_sent', this)
+		this.emit('piece_sent')
 
 	}).bind(this))
 
@@ -224,7 +234,7 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 		this.handshake()
 
 	this.state = this.STATES.connected
-	this.emit('connected', this)
+	this.emit('connected')
 
 	this.bitfield()
 	this.exHandShake()
@@ -307,7 +317,7 @@ Peer.prototype.fulfillRequest = function() { //expects pRequest to be null and p
 
 	this.pRequest = this.pRequestList.shift()
 
-	this.emit('peer_request', this.pRequest.index, this.pRequest.begin, this.pRequest.length, this)
+	this.emit('peer_request', this.pRequest.index, this.pRequest.begin, this.pRequest.length)
 
 }
 
@@ -317,7 +327,7 @@ Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, be
 	this.uploadBytes += piece.length
 	this.uploadTime += uploadTime
 
-	this.emit('peer_piece', index, begin, length, piece, this)
+	this.emit('peer_piece', index, begin, length, piece)
 
 }
 

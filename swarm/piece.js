@@ -1,41 +1,131 @@
 
+/*
+
+Pieces object that reads and writes piecelets
+
+A piece object with a verify method
+
+An active piece object as here
+
+
+*/
+
+var readStreamFunc = async (path, start, end) => {
+
+	let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
+
+	return new Promise( (resolve, reject) => {
+
+		pieceStream.on('readable', () => { 
+			let data = pieceStream.read(pieceLength)  
+			if(data)
+				resolve(data) 
+		})
+})}
+
 var Pieces = (file) => class Piece {
 
 	constructor(index) {
 
-		this.path = this.file //path to file on disk
+		this.fileMetaData = file
 		this.hash = file.pieceHashes[index]
 
-		this.index = index
-		this.isLast = this.index == file.numPieces - 1
+		this.path = this.file //path to file on disk
+		this.pathList = this.file.pathList
+		
+		this.fileLengthList = file.fileLengthList
+
+		this.index = index 
+		this.isLast = index == file.numPieces - 1
+		this.normalPieceLength =  file.pieceLength
 		this.pieceLength = this.isLast ? file.fileLength % file.pieceLength : file.pieceLength
 
-		this.pieceletLength = 2 ** 14
-		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
-		this.piecelets = new Map() //have these piecelet buffers
-		this.left = index * this.pieceLength //byte endpoint
-		this.right = this.left + this.pieceLength //byte endpoint
+	}
 
-		//remove req from arr on issue, add back when fail
-		this.requests = [] // [ {index, start, length } , {index, start, length} , ... ]
+	readPiece() {
 
+		let start = pieceIdx * this.normalPieceLength, end = start + this.pieceLength
+		return readPiecelet(start, end)
 
-		this.nextPiecelet = function *() {
+	}
 
-			let left = this.left
+	async readPiecelet(begin, length) {
 
-			while ( left < this.right ) {
-				
-				let length = (this.right - left) / this.pieceletLength > 1 ? this.pieceletLength : (this.right - left) 
-				yield {index : this.index, begin : left, length : length, putBack : this.putBack}
-				left += this.pieceletLength
-			}
+		let start = pieceIdx * this.normalPieceLength + begin, end = start + this.pieceLength + length
+
+		let metaData = this.fileMetaData
+
+		let leftBound = 0, fileBounds = []
+
+		for(var i = 1 ; i < metaData.fileLengthList.length - 1; i++) {
+
+			let rightBound = leftBound + metaData.fileLengthList[i]
+			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
+				fileBounds.push([i, leftBound, rightBound])
+			leftBound = rightBound
+
+		}
+
+		try {
+
+			let chunks = await Promise.all( fileBounds.map( bound => {
+
+				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
+				return readStreamFunc(metaData.pathList[bound[0]], chunkletStart, chunkletEnd)
+
+			}))
+
+		} catch (error) {
 
 			return false
 
 		}
 
+		return Buffer.concat([chunks])
+
+	}
+
+	async verify() {
+
+		let buf = await this.readPiece()
+
+		let hash = crypto.createHash('sha1').update(buf).digest('hex')
+
+		return this.good = hash == this.hash
+
+	}
+
+}
+
+var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
+
+	constructor(index) {
+
+		super(index)		
+
+		this.pieceletLength = 2 ** 14
+		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
+		this.piecelets = new Map() 
+		this.left = index * this.pieceLength 
+		this.right = this.left + this.pieceLength
 		this.makeRequests()
+
+	}
+
+	* nextPiecelet() {
+
+			let left = this.left, self = this
+
+			while ( left < this.right ) {
+				
+				let length = (this.right - left) / this.pieceletLength > 1 ? this.pieceletLength : (this.right - left) 
+				let request = { index : this.index, begin : left, length : length}
+				request.putBack = () => { self.requests.push(request) }
+				yield request
+				left += this.pieceletLength
+			}
+
+			return false
 
 	}
 
@@ -48,12 +138,6 @@ var Pieces = (file) => class Piece {
 			this.requests.push(next)
 			next = gen.next()
 		}
-
-	}
-
-	putBack(req) {
-
-		this.requests.push(req)
 
 	}
 
@@ -107,14 +191,11 @@ var Pieces = (file) => class Piece {
 
 		} while( left < this.right ) 
 
-		//check hash
-		//if error rebuild requests 
-		//keep piecelets and replace
 		let hash = crypto.createHash('sha1')
 		let hashValue = hash.update(buf).digest('hex')
 		if( hashValue == this.hash) { 
 
-			fs.createWriteStream(this.path, {'start': this.left, highWaterMark : 2**15}).write(buf) //, 'end' : this.right
+			this.writePiece(buf)
 			return true
 		
 		} 
@@ -125,18 +206,42 @@ var Pieces = (file) => class Piece {
 
 
 	}
-	
+
+	writePiece(buf) {
+
+		let metaData = this.fileMetaData
+		let start = this.index * this.file.pieceLength
+		let end = start + this.pieceLength
+
+		let fileBounds = [ [0, 0, metaData.fileLengthList[0]] ]
+
+		for(var i = 1 ; i < metaData.fileLengthList.length - 1; i++) {
+
+			let bound = fileBounds[i-1][2]
+			fileBounds.push( [i, bound,  bound + metaData.fileLengthList[i] ] )
+
+		}
+
+		fileBounds.filter( (bound) => bound[0] < start && bound[1] > start || bound[0] < end && bound[1] > end ).forEach( (bound, i, v) => {
+
+			let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
+			createWriteStream( metaData.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd} ).end(buf.slice(bound[1] % metaData.pieceLength, bound[2] % metaData.pieceLength ))
+
+		})
+
+	}	
+
 	randPieceletReq() {
 
 		let reqIdx = Math.floor(Math.random() * this.requests.length)
 		return this.requests.splice(reqIdx, 1)[0]
-		//return this.nextPiecelet.next(args)
 
 	}	 
 
 }
 
 module.exports = {
-	'Pieces' : Pieces
+	'Pieces' : Pieces,
+	'ActivePieces' : ActivePieces
 }
 

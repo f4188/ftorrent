@@ -7,31 +7,37 @@ benEncode = require('bencode').encode
 EventEmitter = require('events').EventEmitter
 
 NSet = require('../lib/NSet.js').NSet
+ActivePieces = require('./piece.js').ActivePieces
 Pieces = require('./piece.js').Pieces
 
 const UDPTracker = require('../tracker/index.js').UDPTracker
 const Peer = require('../peer/index.js').Peer
 
-//constants
-//outstanding requests per peer
-//number of outstanding requests
-//number of active pieces
 const NUM_REQUESTS_PER_PEER = 5
 const NUM_OUTSTANDING_REQS = 200
 const NUM_ACTIVE_PIECES = 12
 const NUM_CONNECTIONS = 50
 
-// peer requests = [{peer, ... }, ... ]
-// peer pieces = [ { - , pieceIndex}, ... ]
+getUDPSocket = function(port) {
+
+	let sock = dgram.createSocket('udp4').bind(port)
+
+	return new Promise ( (resolve, reject) => {
+		
+		sock.on('listening', () => { resolve(sock) } )
+
+	})
+
+}
 
 var byFreq = (arr, prop) => {
 
 	let freqs = arr.reduce( (freqs, elem) => {
-		if(freqs[elem[prop]]) {
+		if(freqs[elem[prop]]) 
 			freqs[elem[prop]] ++
-		} else {
+		else 
 			freqs[elem[peer]] = 1
-		}
+		
 	}, {})
 
 	Object.keys(freqs).forEach(key => {
@@ -40,13 +46,10 @@ var byFreq = (arr, prop) => {
 
 	let freqArray = []
 
-	let keys = Object.keys(freqs)
-
-	for(key in keys) {
+	for(key in Object.keys(freqs)) 
 		freqArray.push({key : key, freq : freqs[key]})
-	}
 
-	freqArray.sort( (kv1, kv2) => kv1.freq > kv2.freq ) //sort by smallest
+	freqArray.sort( (kv1, kv2) => kv1.freq - kv2.freq ) //sort by smallest
 
 	return freqArray //remove freq
 
@@ -59,9 +62,8 @@ class Swarm extends EventEmitter { //ip list
 
 		super()
 
-		this.peerIDs = new Map()
+		this.peerStats = new Map()
 		this.peers = []
-		//this.optPeers = []
 		
 		this.fileMetaData = fileMetaData
 
@@ -69,9 +71,53 @@ class Swarm extends EventEmitter { //ip list
 		this.disconnected = []
 		this.defaultTimeout = 3 * 1e3
 
-		this.listeners = {}
+		
 		this.myIP = myIP
 		this.myPort = myPort
+
+		let self = this
+
+		this.listeners = {
+
+			'piece_sent' : ( peer ) => {
+
+				let stats = self.peerStats.get(peer.peerID)
+				stats.downloadTime = peer.downloadTime//+= uploadTime
+				stats.downloadBytes = peer.downloadBytes //+= piecelet.length
+
+			},
+
+			'connected' : (  ) => {
+
+				let stats = self.peerStats
+
+				if(!stats.has(this.peerID)) 
+					stats.set(this.peerID, {'uploadedTime' : 0, 'downloadTime' : 0,'uploadBytes': 0, 'downloadBytes': 0,
+						'disconnects' : 0, 'firstConnect' : Date.now()})
+
+			}),
+
+			'disconnected' : ( ) => {
+
+				let stats = this.peerStats.get(this.peerID)
+				stats.disconnects++
+				let pos = self.peers.findIndex(peer)
+
+				if(pos != -1)
+					self.peers.splice(pos, 1)
+
+			}),
+
+
+			'peer_piece' : ((index, begin, piecelet, uploadTime) => { 
+			
+				let stats = self.peerStats.get(this.peerID)
+				stats.uploadTime = this.uploadTime
+				stats.uploadBytes = this.uploadBytes
+
+			}
+
+		}
 
 		var sockOpts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
 
@@ -82,23 +128,20 @@ class Swarm extends EventEmitter { //ip list
 
 			sock.on('data', (data) => console.log(data, data.length))
 			
-			//sock.remote.address, sock.remote.port
 			if(this.peers.some( peer => peer.host == sock.remoteAddress && peer.port == sock.remotePort ))
 				return
-
-			console.log('got connection', self.myPort, sock.remotePort)
 
 			let peer = new Peer(this.fileMetaData, self.listeners, sock) //peer owns socket
 
 			peer.on('connected', () => {
+
 				self.emit('new_peer', peer)
+
 			})
 
 		}).listen(this.myPort)
 
 		this.on('new_peer', (peer) => self.peers.push(peer) )
-
-		//Object.defineProperty
 
 	}
 
@@ -118,14 +161,11 @@ class Swarm extends EventEmitter { //ip list
 				resolve(peer) 
 			})
 			
-		})
+		}
 	}
 
 	addPeers (addrs) {
 		
-		console.log("Adding peers", addrs)
-
-		//addrs.map( (addr) => this.connectPeer(addr) ).forEach( async (promise) => {
 		addrs.forEach( async addr => {
 
 			try {
@@ -135,18 +175,11 @@ class Swarm extends EventEmitter { //ip list
 
 			} catch (error) {
 
-				//console.log(peer)
 				console.log(error)
 
 			}
-			// do something
-			//if bad peer discard
-			//
+			
 		})
-
-	}
-
-	newPeers () {
 
 	}
 
@@ -161,7 +194,7 @@ class Swarm extends EventEmitter { //ip list
 		//return this.byFreq(peers)
 		let have = this.fileMetaData.pieces.has
 		let peerPieceList = peers.map( peer => Array.from(peer.pieces).map({ peer : peer, pieceIndex : peers.pieces } ) )
-		let dontHavePieceList= peerPieceList.filter( peerPieces => !have(peerPieces.pieces) )
+		let dontHavePieceList = peerPieceList.filter( peerPieces => !have(peerPieces.pieces) )
 
 		return byFreq(dontHavePieceList, 'pieceIndex').map( kv => kv.key )
 
@@ -180,10 +213,6 @@ class Swarm extends EventEmitter { //ip list
 		peers = peers || NSet(this.peers)
 		return NSet(Array.from(peers).filter( peer => peer.pieces.have(index)))
 	}
-
-	//havePiece (pieceIndex) {
-	//	this.peers.forEach( peer =>  peer.have(pieceIndex) )
-	//}
 
 	get leechers() {
 		return new NSet(this.peers.filter(peer => !peer.isSeeder()))
@@ -213,14 +242,6 @@ class Swarm extends EventEmitter { //ip list
 		return new NSet(this.peers).difference(this.amUnchokedPeers)
 	}
 
-	/*get idlePeers () {
-		return NSet(this.peers.filter( peer => peer.idle ))
-	}
-
-	get activePeers () {
-		return new NSet(this.peers).difference(this.idle())
-	}*/
-
 	get interestedPeers () {
 		return new NSet(this.peers.filter(peer => peer.interested))
 	}
@@ -239,50 +260,44 @@ class Swarm extends EventEmitter { //ip list
 
 }
 
-function Downloader(myPort) { //extends eventEmitter
-
-	//this.pieces = new Set()
+function Downloader(myPort, peerID) { //extends eventEmitter
 
 	EventEmitter.call(this)
 
 	this.myIP = ""
 	this.myPort = myPort //listen port for new peers
-	this.peerID = crypto.randomBytes(20)
+	this.peerID = peerID || crypto.randomBytes(20)
 	this.port
 
 	this.uLoop = null
 	this.optLoop = null
 	this.sLoop = null
+	this.annLoop = null
 
-	this.activePieces = new Set()
+	this.ActivePieces = new Map()
 	this.pieces = new Map()
 
 	this.announceUrlList = []
 	this.requests = []
 
 	this.fileMetaData = {
+
 		'peerID' : this.peerID,
 		'activePieces' : this.activePieces,
+		'pieces' : this.pieces //pieces this peer has
 		'announceUrlList' : [],
 		'date' : "", 
 		'infoHash' : null,
-		//'raw' : null,
-		'metaInfoSize' : 0,
-		//'info' : null, //for metaDataExchange - must be buffer
-		//'infoSize' : 0,
+		'metaInfoSize' : null,
 		'name' : "",
 		'pieceLength' : null,
 		'fileLength' : null, 
 		'numPieces' : null,
 		'pieceHashes' : [],
-		'pieces' : this.pieces //pieces this peer has
-	}
 
-	this.Piece = Pieces(this.fileMetaData)
+	}
 	
-	let file = this.fileMetaData
-	
-	self = this
+	let self = this, file = this.fileMetaData
 	this.stats = {
 
 		get downloaded() { return self.pieces.has(file.numPieces - 1) ? (file.pieces.size - 1) * file.pieceLength +  file.fileLength % file.pieceLength : file.pieces.size * file.pieceLength },
@@ -294,34 +309,12 @@ function Downloader(myPort) { //extends eventEmitter
 
 	this.swarm = new Swarm(this.fileMetaData, this.myIP, this.myPort)	
 
+	self = this
 
+	this.swarm.listeners['peer_request'] = (index, begin, length) => {  //fulfill all requests from unchoked peers
 
-	this.swarm.listeners = {
-
-		'connected' : (( peer ) => {
-
-			let peerIDs = this.swarm.peerIDs, peerID = peer.peerID
-
-			if(!peerIDs.has(peerID)) 
-				peerIDs.set(peerID, {'uploadedTime' : 0, 'downloadTime' : 0,'uploadBytes': 0, 'downloadBytes': 0,
-					'disconnects' : 0, 'firstConnect' : Date.now()})
-
-		}).bind(this),
-
-		'disconnected' : (( peer ) => {
-
-			let peerStats = this.swarm.peerIDs.get(peer.peerID)
-			peerStats.disconnects++
-			let pos = this.peers.findIndex(peer)
-			if(pos != -1)
-				this.peers.splice(pos, 1)
-
-		}).bind(this),
-
-		'peer_request' : ((index, begin, length, peer) => {  //fulfill all requests from unchoked peers
-
-			let start = index * this.fileMetaData.pieceLength + begin, end = index * this.fileMetaData.pieceLength + begin + length - 1
-			let pieceStream = fs.createReadStream(this.path, {'start': start, 'end' : end})
+			let start = index * self.fileMetaData.pieceLength + begin, end = index * self.fileMetaData.pieceLength + begin + length - 1
+			let pieceStream = fs.createReadStream(self.path, {'start': start, 'end' : end})
 
 			pieceStream.on('readable', () => {
 
@@ -332,52 +325,37 @@ function Downloader(myPort) { //extends eventEmitter
 
 			})
 
-		}).bind(this),
+	}
 
-		'piece_sent' : (peer) => {
+	this.swarm.listeners['peer_piece'] = ((index, begin, piecelet, uploadTime) => { 
 
-			let peerStats = this.swarm.peerIDs.get(peer.peerID)
-			peerStats.downloadTime = peer.downloadTime//+= uploadTime
-			peerStats.downloadBytes = peer.downloadBytes //+= piecelet.length
-
-		},
-
-		'peer_piece' : ((index, begin, piecelet, peer, uploadTime) => { 
-
-			let start = index * this.fileMetaData.pieceLength + begin
-			let piece = this.pieces.get(index)
+			//let start = index * self.fileMetaData.pieceLength + begin
+			let piece = this.activePieces.get(index)
 			piece.add(index, begin, piecelet)
 
-			let peerStats = this.swarm.peerIDs.get(peer.peerID)
-			peerStats.uploadTime = peer.uploadTime//+= uploadTime
-			peerStats.uploadBytes = peer.uploadBytes//+= piecelet.length
-
-			this.requests = this.requests.filter( req => req.index == index && req.begin == begin && req.length == piecelet.length)
+			self.requests = this.requests.filter( req => req.index != index && req.begin != begin && req.length != piecelet.length)
 
 			if(piece.isComplete && piece.assemble()) { //copy to disk		
 
-				this.activePieces.delete(piece)
-				this.fileMetaData.pieces.add(index)
-				this.swarm.havePiece(index)
+				self.activePieces.delete(piece)
+				self.fileMetaData.pieces.add(index)
+				self.swarm.havePiece(index)
 								
 				if(this.pieces.size == this.file.numPieces) {
-					//done
-					//begin seeding
-					//clear downloadPieceLoop
-					//downloadPieceletLoop
-					//seedLoop()
-					//setInterval(seedLoop, 30 * 1e3)
-					return
-				}				
+					self.seeding = true
+					self.seed()	
+					return		
+				} 
 
-				this.pieces.set(index, null)
-				this.emit('recieved_piece') //call downloadPiece before downloadPiecelet
+				self.pieces.set(index, this.Piece(index))
+				self.emit('recieved_piece') //call downloadPiece before downloadPiecelet
+
 
 			} 
 
-			this.emit('recieved_piecelet')
+			self.emit('recieved_piecelet')
 					
-		}).bind(this)
+		}
 
 	}
 
@@ -385,174 +363,79 @@ function Downloader(myPort) { //extends eventEmitter
 
 util.inherits(Downloader, EventEmitter)
 
-Downloader.prototype.setupWithMetaInfoFile = function (metaInfoFilePath) {
+Downloader.prototype.setMetaInfoFile = function (metaInfoFilePath) {
 	
-	let metaInfo
-	if(fs.existsSync(metaInfoFilePath))
-		metaInfo = fs.readFileSync(metaInfoFilePath)
-	else 
+	if(!fs.existsSync(metaInfoFilePath))
 		return
+
+	let metaInfo = fs.readFileSync(metaInfoFilePath)
 
 	let {announce, info} = benDecode(metaInfo)
 
-	//this.metaInfo 
+	this.fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
+	
+	this.setMetaInfo(benEncode(info))
+	
+}
+
+Downloader.prototype.setMagnetUri = function(magnetUri) {
+
+	if(magnetUri.slice(0, 8) != "magnet:?")
+		throw new Error()
+
+	let {xt, dn, tr} = querystring.parse(magnetUri.slice(8))
+	
+	fileMetaData.infoHash = xt.slice(9)
+	fileMetaData.name = dn
+	fileMetaData.announceUrlList = tr
+
+}
+
+Downloader.prototype.setMetaInfo = function (info) {
 
 	let fileMetaData = this.fileMetaData
 
-	let m = info
-
-	fileMetaData.infoHash = new Buffer(crypto.createHash('sha1').update(benEncode(info)).digest('hex'), 'hex')
-	fileMetaData.metaInfoRaw = metaInfo
-	fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
-	fileMetaData.metaInfoSize = metaInfo.length
+	fileMetaData.metaInfoRaw = info
+	fileMetaData.metaInfoSize = info.length
+	fileMetaData.infoHash = new Buffer(crypto.createHash('sha1').update(info).digest('hex'), 'hex')
 	//fileMetaData.date = ['creation date']
+
+	let m = benDecode(info)
 	fileMetaData.name = m.name.toString()
 	fileMetaData.pieceLength = m['piece length']
-	fileMetaData.fileLength = m.length
 	fileMetaData.pieceHashes = m.pieces.toString('hex').match(/.{40}/g) //string or buffer ???
-	fileMetaData.numPieces = Math.ceil(fileMetaData.fileLength / fileMetaData.pieceLength) 
-
-	this.path = "./" + fileMetaData.name
 
 	if(m.length) {
-		//single file
+
 		fileMetaData.isDirectory = false
+		fileMetaData.fileLength = m.length
+		fileMetaData.path = "./" + fileMetaData.name
+		fileMetaData.pathList = [ fileMetaData.path ]
 
 	} else if(m.files) {
 
 		fileMetaData.isDirectory = true
-		fileMetaData.fileList = m.files
+		fileMetaData.fileLengthList = m.files.map( pairs => pairs.length )
+		fileMetaData.fileLength = fileMetaData.fileLengthList.reduce( (a, b) => a + b, 0)
+		fileMetaData.pathList = m.files.map( pairs => pairs.path ).map( name => './' + name)
 
 	}
 
+	fileMetaData.numPieces = Math.ceil( fileMetaData.fileLength / fileMetaData.pieceLength) 
 
-}
+	for(let idx = 0; idx < file.numPieces; idx ++ ) {
 
-Downloader.prototype.setupWithMagnetUri = function(magnetUri) {
-
-	//use metaDataEx to acquire info 
-	//do announce and get peers
-	//parse uri
-	//get infohash
-	
-	fileMetaData.infoHash = infoHash
-
-
-}
-
-Downloader.prototype.checkDisk = async function() {
-
-	if(!this.fileMetaData.isDirectory) {
-		return await this.checkFile(this.path, 0)
-	}
-
-}
-
-Downloader.prototype.checkFile = async function(path, offSet) {
-
-	//let path  this.fileMetaData.name
-	let size, stats
-	let pieceLength = this.fileMetaData.pieceLength
-	let lastPieceLength = this.fileMetaData.fileLength % this.pieceLength
-
-	if(fs.existsSync(path))
-		stats = await this.getFileStats(path)
-
-	size = stats.size
-	
-	console.log('size', size)
-
-	var readStreamFunc = async (pieceStream, pieceLength) => {
-
-		return new Promise( (resolve, reject) => {
-
-			pieceStream.on('readable', () => { 
-				let data = pieceStream.read(pieceLength)  
-				if(data)
-					resolve(data) 
-			})
-
-		})
+		let piece = new this.Piece(i)
+		if(piece.verify())
+			this.pieces.set(idx, piece)
 
 	}
 
-	let pieces = this.pieces// new Set()
-	let haveAtMostNumPieces = Math.ceil(size / pieceLength)
-
-	let start = 0, end = pieceLength
-	let buf
-	
-	for(let pieceIndex = 0; pieceIndex < haveAtMostNumPieces; pieceIndex++) {
-	
-		let pieceStream = fs.createReadStream(path, {start : start , end : end})
-		let pLength = pieceLength
-
-		if(pieceIndex == this.fileMetaData.numPieces - 1)
-			pLength = lastPieceLength
-		
-		buf = await readStreamFunc(pieceStream, pLength)
-
-		let hash = crypto.createHash('sha1').update(buf).digest('hex')
-		if(hash == this.fileMetaData.pieceHashes[pieceIndex + 0])
-			pieces.set(pieceIndex, hash)
-
-		start += pieceLength
-		end += pieceLength
-
-	}
-
-	return this.pieces.size == this.fileMetaData.numPieces 
+	this.seeding = this.pieces.size == fileMetaData.numPieces
 
 }
 
-Downloader.prototype.getFileStats = function (path) {
-
-	return new Promise( (resolve, reject) => {
-		fs.stat(path, (err, stats) => resolve(stats))
-	})
-
-}
-
-//start or resume download or seed
 Downloader.prototype.start = async function() {
-
-	//read torrent file or parse magnet link
-	
-	//on startup check disk
-	//if file complete, verify, then seed
-	//if file incomplete, verify pieces, begin leeching
-	this.seeding = await this.checkDisk(this.path, 0)  //discard corrupt pieces
-
-
-	console.log('Checked disk. Have file:', this.seeding)
-	let peers
-	let resps 
-	//setup swarm
-	if(!this.fileMetaData.announceUrlList) { //dht announce
-
-		//peers = dht.announce(this.fileMetaData.infoHash)
-		this.DHTAnnounce()
-		
-	} else { 
-		
-		//while(!peers) {
-			console.log('announcing')
-			//resps = 
-			
-			peers = await this.urlAnnounce()
-			
-			
-			peers = peers[0].peerList.filter( elem => elem[1] != this.myPort )
-			console.log("peers", peers, this.myPort)
-
-		//}
-	} 
-
-	if(!peers) {
-		//oh shit
-	}
-
-	this.swarm.addPeers(peers.map( (tuple) => { return { host : tuple[0], port : tuple[1] } } ))
 
 	if(this.seeding)
 		this.seed()
@@ -563,20 +446,21 @@ Downloader.prototype.start = async function() {
 
 Downloader.prototype.leech = function() {
 
-	clearInterval(this.sloop)
+	//clearInterval(this.sloop)
+	this.announceLoop()
+	this.annLoop = setInterval((this.announceLoop).bind(this) 300 * 1e3,
 
-	this.optUnchokeLoop()
+	this.once('new_peers', (this.optUnchokeLoop).bind(this))
 	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), 30 * 1e3)
 
 	this.on('recieved_piece', (this.downloadPiece).bind(this))
 	this.on('recieved_piecelet', (this.downloadPiecelets).bind(this))
 	this.on('request_timeout', (this.downloadPiecelets).bind(this))
 
-	this.unchokeLoop()
+	this.once('new_peers', (this.unchokeLoop).bind(this))
 	this.uLoop = setInterval((this.unchokeLoop).bind(this), 10 * 1e3)
 
-	//called again by listeners
-	this.downloadPiece()
+	this.downloadPieces()
 	this.downloadPiecelets()
 
 }
@@ -586,35 +470,28 @@ Downloader.prototype.seed = function () {
 	clearInterval(this.uLoop)
 	//clear listeners ??
 
-	this.optUnchokeLoop()
+	this.announceLoop()
+	this.annLoop = setInterval((this.announceLoop).bind(this) 300 * 1e3, 
+
+	this.once('new_peers', (this.optUnchokeLoop).bind(this))
 	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), 30 * 1e3)
 
-	this.seedLoop()
+	this.once('new_peers', (this.seedLoop()).bind(this))
 	this.sLoop = setInterval((this.seedLoop).bind(this), 30 * 1e3)
 
 }
 
-Downloader.prototype.pruneConn = function() {
-	//add new connections
-		//get peers from dht ?
-		//peerex
-
-		//prune connections
-	//discover more peers
-	//urlAnnounce()
-	//DHTAnnounce
-	//Peerexchange
-
-
-	//disconnect lowest upload rate ???
+Downloader.prototype.announceLoop = function() {
+	
+	this.urlAnnounce()
+	this.DHTAnnounce()
 
 }
-
 
 Downloader.prototype.seedLoop = function() {
 
 		let swarm = this.swarm
-		let peerMap = this.swarm.peerIDs
+		let peerMap = this.swarm.peerStats
 
 		console.log("seed loop:", Date.now())
 
@@ -651,7 +528,7 @@ Downloader.prototype.optUnchokeLoop = function() {
 
 		}
 
-		let swarm = this.swarm, peerMap = this.swarm.peerIDs
+		let swarm = this.swarm, peerMap = this.swarm.peerStats
 
 		let interestedAndChoked = swarm.leechers.intersection(swarm.interestedPeers).intersection(swarm.chokedPeers)
 
@@ -674,26 +551,6 @@ Downloader.prototype.optUnchokeLoop = function() {
 
 Downloader.prototype.unchokeLoop = function() {
 
-	/* :::: for leechers ::::
-
-	(1) only mutually interested 
-	unamchoked --- unchoked - (if active do nothing - if idle) unchoke by upload -- should be 8
-	unamchoked --- choked - unchoke by upload            --have unchoked me - maybe have chosen me as opt unchoke (amOpt)
-	amchoked ----- unchoked - choke                      --have choked me  -- maybe choose as opt unchoke if new (opt)
-	amchoked ----- choke - do nothing                    -- not interested
-	 
-
-	(2) amUnInterested - interested  ------- select as opt unchoke (opt)
-		amchoked -- choked
-
-	(3) amInterested - unInterested  ------- might select me as opt unchoke (amOpt)
-		amchoked -- choked
-		
-	(4) mutually uninterested     - have same pieces or no pieces or both seeders
-		amchoked -- choked
-	*/
-
-	//blacklist peers that do not answer requests ?
 	let swarm = this.swarm
 
 	//choke any peer that chokes me and is not opt unchoke
@@ -707,7 +564,7 @@ Downloader.prototype.unchokeLoop = function() {
 
 	let amUnchoked = mutuallyInterestedPeers.intersection(swarm.amUnchokedPeers)
 
-	let peerMap = this.swarm.peerIDs
+	let peerMap = this.swarm.peerStats
 	let unchokeCandidates = Array.from(amUnchoked).sort( (p1, p2) => {
 
 		let p1Stats = peerMap.get(p1), p2Stats = peerMap.get(p2)
@@ -742,7 +599,7 @@ Downloader.prototype.unchokeLoop = function() {
 }
 
 //piece downloader - only called when pieces available
-Downloader.prototype.downloadPiece = function() {
+Downloader.prototype.downloadPieces = function() {
 
 	peers = this.swarm.amUnchokedPeers.intersection(this.swarm.amInterestedPeers)
 	//get resend requests sent to peers that are now choked
@@ -755,7 +612,7 @@ Downloader.prototype.downloadPiece = function() {
 		let pIndex = hist[randArrIdx]
 		console.log(pIndex)
 		if(!this.pieces.has(pIndex)) 
-			this.activePieces.add(new this.Piece(pIndex))
+			this.activePieces.add(new this.ActivePiece(pIndex))
 	}
 
 	//download pieces from mutually unchoked peers in group (1) and amUnchoked peers in group (3)
@@ -786,7 +643,7 @@ Downloader.prototype.downloadPiecelets = function() {
 		let pieceletReq, randomIndex, piece
 		let iters = 0
 
-		let pieces = peer.pieces.intersection(this.activePieces) //swarm.pieces(peers)
+		let pieces = peer.pieces.intersection(new NSet(this.activePieces.keys())) //swarm.pieces(peers)
 
 		do { //randomly select piece, get piecelet or if no piecelet then repeat
 
@@ -826,47 +683,49 @@ Downloader.prototype.downloadPiecelets = function() {
 
 }
 
+Downloader.prototype.pruneConn = function() {
+
+}
+
+Downloader.prototype.addPeers = function(peers) {
+
+	//apply filters
+	this.swarm.addPeers(peers.map( (tuple) => { return { host : tuple[0], port : tuple[1] } } ))
+
+	this.pruneConn()
+
+	this.emit('new_peers')
+}
+
 Downloader.prototype.DHTAnnounce = async function() {
 
 }
 
-//infoHash, peerID, downloaded, left, uploaded, ev, IPAddress, key, numWant, port
-//transactID, infoHash, peerID, stats, ip, key, numWant, port
-Downloader.prototype.urlAnnounce = async function() {
-	//stats = {downloaded, left, uploaded, ev}
+Downloader.prototype.urlAnnounce = function() {
 	
-	//tracker announce)
-	let sock = await this.getUDPSocket()
-
 	let infoHash = this.fileMetaData.infoHash
 	let peerID = this.peerID
 
-	return await Promise.all(this.fileMetaData.announceUrlList.map( async (announceUrl) => {		
+	getUDPSocket().then( (sock) => {
 
-		if(announceUrl.slice(0,6) == 'udp://') { //udp tracker			
-			let tracker = new UDPTracker(sock, announceUrl, infoHash, peerID)
-			//console.log(tracker)
-			return await tracker.doAnnounce(this.stats, this.myPort) 
+		this.fileMetaData.announceUrlList.forEach( (announceUrl) => {
+
+			let url = new url.URL(announceUrl)		
+
+			if(url.protocol == 'udp:') { //udp tracker		
+
+				let tracker = new UDPTracker(sock, url.host, infoHash, peerID)
+				(tracker.doAnnounce(this.stats, this.myPort)).then(resp => this.addPeers(resp.peerList))
 			
+			} else if (url.protocol == 'http:') {
 
-		} else if (announceUrl.slice(0,7) == 'http://') {
-			let tracker = new HTTPTracker(sock, announceUrl, infoHash, peerID)
-			return await tracker.doAnnounce(this.stats)
-		}
-	}))
+				//let tracker = new HTTPTracker(sock, announceUrl, infoHash, peerID)
+				//let resp await tracker.doAnnounce(this.stats)
 
-}
+			}
+		})
 
-Downloader.prototype.getUDPSocket = function(port) {
-
-	let sock = dgram.createSocket('udp4').bind()
-
-	return new Promise ( (resolve, reject) => {
-		
-		sock.on('listening', () => { resolve(sock) } )
-
-	})
-
+	}
 }
 
 module.exports = {

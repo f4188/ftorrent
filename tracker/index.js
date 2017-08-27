@@ -3,8 +3,9 @@
 //const parsedUri = require('magnet-uri').decode(magnetLink)
 
 module.exports = {
-	//'announce' : announce,
+
 	'UDPTracker' : UDPTracker
+
 }
 
 const dgram = require('dgram')
@@ -15,11 +16,6 @@ const UDPRes = require('./UDPResponse.js')
 const AnnounceResp = UDPRes.AnnounceResp
 const RequestResp = UDPRes.RequestResp
 const Response = UDPRes.Response
-
-
-var getPort = function getPortFromURL(url) {
-	return parseInt(url.split(":")[2]);	
-}
 
 var getAddr = function getAddressFromURL(url) {
 	
@@ -49,27 +45,30 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	this.canConnect = true 
 	this.canConnectTimeout
 
-	const URL = require('url').URL
-	var host = new URL(url)
+	//const URL = require('url').URL
+	//var host = url//new URL(url)
 
-	this.announce = host.hostname
+	this.client = sock
+	this.address = net.isIP(url.hostname) ? this.address = urlhostname : this.address = null
+	this.host = host.hostname
+	this.port = url.port
+
 	this.infoHash = infoHash
-	this.port = getPort(url)
 	this.peerID = peerID
+
 	this.stats = null
 
 	//filled by tracker on announce
-	this.address = net.isIP(this.announce) ? this.announce : null
 	this.numLeechers = null,
 	this.numSeeders = null,
 	this.interval = null,
 	this.peerList = null,
 	
-	this.client = sock
 	this.transactID = null
 	this.connectID = null;
 	this.connectIDEx = null;
 	this.timeoutInterval = 3000
+	
 }
 
 UDPTracker.prototype._sendAnnounceRequest = function(request) {
@@ -139,20 +138,13 @@ UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
 
 	
 	if(!this.address)
-		this.address = await getAddr(this.announce)
+		this.address = await getAddr(this.hostname)
 
 	try {
 
 		let connReq = this._buildConnectReq()
 		connResp = await this._sendConnectRequest(connReq)
 		this.connectID = connResp.getConnectID()
-
-		/*
-	} catch (error) {
-		console.log(error)
-	}
-
-	try {*/
 
 		let annReq = this._buildAnnounceReq()
 		annResp = await this._sendAnnounceRequest(annReq)
@@ -164,30 +156,34 @@ UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
 		this.canConnectTimeout = setTimeout( (()=> { this.canConnect = true }).bind(this), this.interval) //seconds or ms ??
 
 		this.peerList = annResp.getPeerList()
-		//console.log(this.peerList)
 
 	} catch (error) {
 		console.log(error)
 	}
 
 	return { 
+
 		'numLeechers' : this.numLeechers,
 		'numSeeders' : this.numSeeders,
 		'interval' : this.interval,
 		'peerList' : this.peerList
+
 	}
 
 }
 
 UDPTracker.prototype._buildConnectReq = function() {
+
 	var buf = new Buffer(16)
 	Buffer.from([0x0, 0x0, 0x4, 0x17, 0x27, 0x10, 0x19, 0x80]).copy(buf, 0, 0, 8)
 	buf.writeUInt32BE(0x0, 8)
 	this.transactID.copy(buf, 12, 0, 4)
 	return buf
+
 }
 
 UDPTracker.prototype._buildAnnounceReq = function() {
+
 	var key
 	var buf = new Buffer(98);
 	var ip = 0;
@@ -197,23 +193,18 @@ UDPTracker.prototype._buildAnnounceReq = function() {
 	this.transactID.copy(buf, 12, 0, 4)
 	this.infoHash.copy(buf, 16, 0, 20)
 	this.peerID.copy(buf, 36, 0, 20)
-
-	
 	buf.writeUInt32BE(Math.floor(this.stats.downloaded / 2**32), 56)
 	buf.writeUInt32BE(this.stats.downloaded % 2**32, 56 + 4)
-
 	buf.writeUInt32BE(Math.floor(this.stats.left / 2**32), 64 )
 	buf.writeUInt32BE(this.stats.left % 2**32, 64 + 4)
-
 	buf.writeUInt32BE(Math.floor(this.stats.uploaded) / 2**32, 72)
 	buf.writeUInt32BE(this.stats.uploaded % 2**32, 72 + 4)
-
 	buf.writeUInt32BE(this.stats.ev, 80); //event - 0:none, 1:complete, 2:started, 3:stopped
-
 	buf.writeUInt32BE(ip, 84);
 	buf.writeUInt32BE(key, 88) //?
 	buf.writeInt32BE(numWant, 92)
 	buf.writeUInt16BE(this.myIP , 96)
-	return buf;
+	return buf
+
 }
 
