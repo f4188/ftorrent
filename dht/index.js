@@ -174,11 +174,29 @@ class DHT {
 		let bootstrapNodeAddrs = [[6881, 'router.bittorrent.com'], [6881, 'dht.transmissionbt.com'], [6881, 'router.utorrent.com']]
 		
 		let ips = await Promise.race(bootstrapNodeAddrs.map( node =>  this.lookup(node[1])))
-		//ips = ips.filter(x => x)
-		//(nodeID, port, host, myNodeID, sock)
+
 		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock) //do not insert in routing table
 
-		let nodes = await bootStrapNode.findNode(this.myNodeID) // inserts nodes in dht 
+		let nodes
+		let tries = 0
+
+		//while( tries++ < 5 && !nodes) {
+		while(!nodes) {
+
+			try {
+
+				nodes = await bootStrapNode.findNode(this.myNodeID) // inserts nodes in dht 
+			
+			} catch (error) {
+
+				if(error instanceof TimeoutError && tries >= 5)
+					throw new TimeoutError('bootstrap node timeout')
+				else
+					throw new Error("bootstrap node error")
+
+			}
+
+		}
 
 		let ret = await this.findNodeIter(this.myNodeID) //builds dht
 
@@ -197,7 +215,6 @@ class DHT {
 
 		let [peers, nodes] = await getPeersIter(infoHash)
 
-		//let aNodes = await Promise.all(nodes.forEach(node => node.announcePeer(infoHash, this.port)))
 		nodes.forEach(node => node.announcePeer(infoHash, this.port))
 		
 		return peers
@@ -216,7 +233,7 @@ class DHT {
 			let kClosest = nodes, kClosestCount = 0
 
 			var query = (node) => {
-				//console.log("querying:", node)
+
 				if(kClosestCount >= 8)
 					return
 
@@ -229,7 +246,7 @@ class DHT {
 					querySuccess()
 
 				}).catch( (err) => { 
-					//console.log(err)
+
 					queryFail(node)
 				
 				})
@@ -246,8 +263,8 @@ class DHT {
 				
 				kClosest = closestSoFar
 				
-				console.log("myNodeID:", this.myNodeID, kClosestCount)
-				console.log("kClosest:", kClosest.sort( xorCompareIDs(nodeID) ))
+				//console.log("myNodeID:", this.myNodeID, kClosestCount)
+				//console.log("kClosest:", kClosest.sort( xorCompareIDs(nodeID) ))
 
 				if(kClosestCount >= 8)
 					resolve([null, kClosest]) //called only once
@@ -282,24 +299,21 @@ class DHT {
 			allNodes.forEach( node => query(node) )
 
 		})
-		
-		//return [node, Array.from(allNodes).sort(xorCompare(infoHash)).slice(0,8)]
-	
+			
 	}
 
 	async getPeersIter(nodeID) {
 
 		return new Promise( (resolve, reject) => {
 
+			let allPeers = []
 			let [peers, nodes] = this.getPeers(nodeID)
-			//if(nodeID == this.myNodeID) 
-			//	node = undefined
 
 			let allNodes = new NSet(nodes), queriedNodes = new NSet()
-			let kClosest = nodes, kClosestCount = 0
+			let kClosest = nodes, kClosestCount = 0, peerCount = 0
 
 			var query = (node) => {
-				//console.log("querying:", node)
+
 				if(kClosestCount >= 8)
 					return
 
@@ -308,12 +322,11 @@ class DHT {
 				this.getNode(node).getPeers(nodeID).then( result => {
 
 					let [peers, nodes] = result
-					//result = result.filter( id => id != this.myNodeID )
 					allNodes = allNodes.union(new NSet(nodes))
 					querySuccess(peers, nodes)
 
 				}).catch( (err) => { 
-					console.log(err)
+					//console.log(err)
 					queryFail(node)
 				
 				})
@@ -329,16 +342,10 @@ class DHT {
 					kClosestCount = 0
 				
 				kClosest = closestSoFar
-				
-				console.log("myNodeID:", this.myNodeID, kClosestCount)
-				console.log("kClosest:", kClosest.sort( xorCompareIDs(nodeID) ))
-
+				allPeers = allPeers.concat(peers)
+			
 				if(kClosestCount >= 8)
-					resolve([null, kClosest]) //called only once
-				if(peers) {
-					kClosestCount = 8
-					resolve([peers, kClosest])
-				}
+					resolve([allPeers, kClosest]) //called only once
 
 			}
 
@@ -360,15 +367,14 @@ class DHT {
 					return
 
 				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
+				//if no nodes found and no nodes left silent exit
 
 			}
 
 			allNodes.forEach( node => query(node) )
 
 		})
-		
-		//return [node, Array.from(allNodes).sort(xorCompare(infoHash)).slice(0,8)]
-	
+			
 	}
 
 	getPeers(infoHash) {
@@ -448,7 +454,7 @@ class DHT {
 			this.buckets.push(bucket)
 
 		} else { //doesn't already contain node and is full
-			//ping questionable nodes
+
 			this.replaceNodesInDHT(nodeID, node, bucket)
 
 		}
@@ -494,7 +500,6 @@ class DHT {
 
 	}
 
-	//infoHash or nodeID
 	_findBucketFits(id) {
 
 		return this.buckets.find((bucket) => bucket.fits(id)) //always returns a bucket
@@ -544,7 +549,6 @@ class DHT {
 
 	}
 
-	//build responses using findNode and getPeers
 	_respPing(request) {
 
 		return {'t': request.t, 'y': 'r', 'r': {'id' : new Buffer(this.myNodeID, 'hex')}}
@@ -572,7 +576,7 @@ class DHT {
 		
 		if(peers)
 			response.r.values = peers.map(peer => peer.getContactInfo())
-		//else if(nodeIDs)
+
 		response.r.nodes = nodeIDs.map( id => this.getNode(id).getContactInfo()).join("") 
 
 		return response
@@ -587,7 +591,7 @@ class DHT {
 			return {'t': request.t, 'y': 'e', 'e': [203,"Bad Token"]} 
 
 		let port = request.a.implied_port != 0 ? impliedPort : request.a.port
-		//if()
+
 		this.infoHashes[request.a.info_hash.toString('hex')].push(new Peer(port, this.host, request.a.id))
 
 		return {'t': request.t, 'y':'r', 'r' : {'id': new Buffer(this.myNodeID, 'hex')}}	
@@ -691,9 +695,7 @@ class Node {
 		this.host = host
 		this.myNodeID = myNodeID//dht.myNodeID
 		this.sock = sock
-		this.default_timeout = 1000
-		//this.dht = dht
-		//this.sock = sock
+		this.default_timeout = 2000
 
 		//only if in dht or questionable list
 		this.everResp = false // ever
@@ -707,9 +709,6 @@ class Node {
 		this.bad = false
 		this.numNoResp = 0
 
-		//this.inDHT = false
-
-		//single string
 		this.parseNodeContactInfos = function parseNodeInfos(compactInfos) {
 
 			var slicer = (buf) => {
@@ -731,8 +730,6 @@ class Node {
 			})
 
 		}
-
-		//list of strings
 	
 	}
 
@@ -794,6 +791,7 @@ class Node {
 	}
 
 	resetRespTimer() {
+
 		let self = this
 		clearTimeout(self.respTimer)
 		this.everResp = true
@@ -803,33 +801,31 @@ class Node {
 	}
 
 	getContactInfo() {
+
 		let portBuf = new Buffer(2)
 		portBuf.writeUInt16BE(this.port)
 		let contactInfo = Buffer.concat([Buffer.from(this.nodeID, 'hex'), Buffer.from(this.host.split('.')), portBuf])
-		//contactInfo.writeUInt32BE(), 20)
-		//contactInfo.writeUInt16BE(this.port, 24)
 		return contactInfo
+
 	}
 
 	async ping() {
 
 		let transactID = crypto.randomBytes(2)
 		let request = {'t': transactID, 'y':'q', 'q': 'ping', 'a': {'id': Buffer.from(this.myNodeID,'hex')}}
-		//{t: id, y: r, r:{id: ___}}
+
 		let then = Date.now()
 
 		try {
 			let response = await this._sendRequest(request)
-		//if(response) this.resetQueryTimer()
-		//this.resetRespQueryTimer()
-		//if(response.r.id.toString('hex') == this.nodeID)
+		
 			return Date.now() - then
 
 		} catch(error) {
 
 			if(error instanceof TimeoutError)
 				this.numNoResp++
-			//console.log(error)
+
 			throw error
 		} 
 	}
@@ -839,7 +835,7 @@ class Node {
 
 		let transactID = crypto.randomBytes(2)
 		let request = {'t': transactID, 'y' : 'q', 'q' : 'find_node', 'a' : {'id': Buffer.from(this.myNodeID,'hex'), 'target': Buffer.from(targetNodeID,'hex')}}
-		//console.log("request", request)
+
 		let response
 
 		try {
@@ -852,8 +848,7 @@ class Node {
 
 			if(error instanceof TimeoutError)
 				this.numNoResp++
-			//console.log(error)
-			//return false
+
 			throw error
 
 		}
@@ -878,7 +873,7 @@ class Node {
 				nodes = this.parseNodeContactInfos(response.r.nodes)
 			if(response.r.values)
 				peers = this.parsePeerContactInfos(response.r.values, response.r.id)
-			//console.log(peers)
+
 			return [ peers, nodes ]
 
 		} catch( error ) {
