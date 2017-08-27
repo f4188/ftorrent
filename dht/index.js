@@ -14,10 +14,12 @@ const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
 var flatten = (list) => list.reduce((a,b) => a.concat(b), []) 
 
 //var	xorCompare = (id) => (nodeID1, nodeID2) => parseInt(xor(nodeID1 , id).toString('hex'), 16) > parseInt(xor(nodeID2 , id).toString('hex'), 16)
-var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1.nodeID, 'hex') , id).toString('hex'), 16) - parseInt(xor(new Buffer(node2.nodeID, 16) , id).toString('hex'), 16)
-var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor( new Buffer(node1, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16) - parseInt( xor(new Buffer(node2, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16)
-var	xorCompareIDStrings = (id) => (node1, node2) => parseInt(node1, 16) ^ parseInt(id, 16) - parseInt(node2, 16) ^ parseInt(id, 16)
+//var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1.nodeID, 'hex') , id).toString('hex'), 16) - parseInt(xor(new Buffer(node2.nodeID, 16) , id).toString('hex'), 16)
+//var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor( new Buffer(node1, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16) - parseInt( xor(new Buffer(node2, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16)
 
+var	xorCompareIDStrings = (id) => (node1, node2) => parseInt(node1, 16) ^ parseInt(id, 16) - parseInt(node2, 16) ^ parseInt(id, 16)
+var xorCompareIDs = xorCompareIDStrings
+var xorCompare = xorCompareIDStrings
 
 var makeNode
 
@@ -60,7 +62,7 @@ class DHT {
 			this.sock.bind(port)
 		}
 
-		this.sock.setMaxListeners(200)
+		this.sock.setMaxListeners(400)
 		this.sock.on('message', (this._recvRequest).bind(this))	
 
 		this.newToken = {} //new token every five minutes
@@ -344,6 +346,7 @@ class DHT {
 				kClosest = closestSoFar
 				if(peers)
 					allPeers = allPeers.concat(peers)
+				console.log(peers)
 			
 				if(kClosestCount >= 8)
 					resolve([allPeers, kClosest]) //called only once
@@ -457,7 +460,7 @@ class DHT {
 
 		} else { //doesn't already contain node and is full
 
-			this.replaceNodesInDHT(nodeID, node, bucket)
+			//this.replaceNodesInDHT(nodeID, node, bucket)
 
 		}
 		
@@ -472,9 +475,9 @@ class DHT {
 
 		let aQuesNodeID = quesNodeIDs.shift()
 
-		while( quesNodeIDs.length != 0 ) {
+		while( quesNodeIDs.length > 0 ) {
 
-			try{
+			try {
 
 				await this.getNode(aQuesNodeID).ping()
 				
@@ -826,11 +829,12 @@ class Node {
 
 		let transactID = crypto.randomBytes(2)
 		let request = {'t': transactID, 'y':'q', 'q': 'ping', 'a': {'id': Buffer.from(this.myNodeID,'hex')}}
-
+		let response
 		let then = Date.now()
 
 		try {
-			let response = await this._sendRequest(request)
+
+			response = await this._sendRequest(request)
 		
 			return Date.now() - then
 
@@ -940,7 +944,7 @@ class Node {
 
 				}
 
- 				if(response.t.equals(request.t)) { //buffers
+ 				if(response.t && response.t.equals(request.t)) { //buffers
 
 					clearTimeout(timeout)
 					self.sock.removeListener('message', listener)
