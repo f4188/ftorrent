@@ -16,7 +16,7 @@ var flatten = (list) => list.reduce((a,b) => a.concat(b), [])
 
 //var	xorCompare = (id) => (nodeID1, nodeID2) => parseInt(xor(nodeID1 , id).toString('hex'), 16) > parseInt(xor(nodeID2 , id).toString('hex'), 16)
 var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1.nodeID, 'hex') , id).toString('hex'), 16) - parseInt(xor(new Buffer(node2.nodeID, 16) , id).toString('hex'), 16)
-var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor(new Buffer(node1, 'hex') , id).toString('hex'), 16) - parseInt(xor(new Buffer(node2, 16) , id).toString('hex'), 16)
+var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor( new Buffer(node1, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16) - parseInt( xor(new Buffer(node2, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16)
 
 
 var makeNode
@@ -60,11 +60,13 @@ class DHT {
 			this.sock.bind(port)
 		}
 
-		this.sock.setMaxListeners(100)
+		this.sock.setMaxListeners(200)
 		this.sock.on('message', (this._recvRequest).bind(this))	
 
 		this.newToken = {} //new token every five minutes
 		this.oldToken = {} //replaced with newToken
+
+		this.refreshLoop = null
 
 		let self = this
 
@@ -111,6 +113,21 @@ class DHT {
 		makeNode = this.makeNode
 
 		this.loadDHT()
+
+	}
+
+	refreshBuckets() {
+
+		this.buckets.forEach( bucket => {
+
+			let lastChanged = Math.max(bucket.lastChanged, ...bucket.nodeIDs.map( nodeID => this.getNode(nodeID).lastChanged ))
+			
+			if(Date.now() - lastChanged > 15 * 60 * 1e3) {
+				let rand = Math.floor(Math.random() * this.bucket.nodeIDs.length)
+				this.findNodeIter(bucket.nodeIDs[rand]).catch( err => console.log("Refresh:", err))	
+			}
+
+		})
 
 	}
 
@@ -163,7 +180,11 @@ class DHT {
 
 		let nodes = await bootStrapNode.findNode(this.myNodeID) // inserts nodes in dht 
 
-		await this.findNodeIter(this.myNodeID) //builds dht
+		let ret = await this.findNodeIter(this.myNodeID) //builds dht
+
+		this.refreshLoop = setInterval((this.refreshBuckets).bind(this), 15 * 60 * 1e3)
+
+		return ret
 
 	}
 
@@ -187,25 +208,29 @@ class DHT {
 
 		return new Promise( (resolve, reject) => {
 
-			let [node, nodes] = this.findNode(nodeID)
-			if(nodeID == this.myNodeID) 
-				node = undefined
+			let [[node], nodes] = this.findNode(nodeID)
+			//if(nodeID == this.myNodeID) 
+			//	node = undefined
 
 			let allNodes = new NSet(nodes), queriedNodes = new NSet()
 			let kClosest = nodes, kClosestCount = 0
 
 			var query = (node) => {
+				//console.log("querying:", node)
+				if(kClosestCount >= 8)
+					return
 
 				queriedNodes.add(node)
 
 				this.getNode(node).findNode(nodeID).then( result => {
 
+					result = result.filter( id => id != this.myNodeID )
 					allNodes = allNodes.union(new NSet(result))
 					querySuccess()
 
 				}).catch( (err) => { 
-					
-					queryFail()
+					//console.log(err)
+					queryFail(node)
 				
 				})
 
@@ -214,33 +239,47 @@ class DHT {
 			var successTest = () => {
 
 				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
-				if(new NSet(kClosest).intersection(new NSet(closestSoFar)).size >= 8)
+				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
 					kClosestCount++
+				else 
+					kClosestCount = 0
 				
 				kClosest = closestSoFar
 				
-				console.log("myNodeID:", this.myNodeID)
-				console.log("kClosest:", kClosest)
-				if(kClosestCount == 8)
-					resolve([null, kClosest])
+				console.log("myNodeID:", this.myNodeID, kClosestCount)
+				console.log("kClosest:", kClosest.sort( xorCompareIDs(nodeID) ))
+
+				if(kClosestCount >= 8)
+					resolve([null, kClosest]) //called only once
+				if(closestSoFar.findIndex( id => id == nodeID) != -1) {
+					kClosestCount = 8
+					resolve([nodeID, kClosest])
+				}
 
 			}
 
 			var querySuccess = () => {
 
+				if(kClosestCount >= 8)
+					return
+
 				successTest()
+
 				let closestUnqueried = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 8)
 				closestUnqueried.slice(0,1).forEach(node => query(node))
 
 			}
 
-			var queryFail = () => {
+			var queryFail = (node) => {
+
+				if(kClosestCount >= 8)
+					return
 
 				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
 
 			}
 
-			allNodes.forEach(node => query(node))
+			allNodes.forEach( node => query(node) )
 
 		})
 		
@@ -248,44 +287,94 @@ class DHT {
 	
 	}
 
-	async getPeersIter(infoHash) {
+	async getPeersIter(nodeID) {
 
-		let [peers, nodes] = this.getPeers(infoHash) 
-		
-		let allNodes = new NSet(nodes), queriedNodes = new NSet(), nodesToQuery = allNodes, lastIter = false
+		return new Promise( (resolve, reject) => {
 
-		while( nodesToQuery.size > 0 ) {
-	
-			let results = await Promise.all( Array.from( nodesToQuery ).map( async (node) => await node.getPeers(infoHash) ) )
-			console.log('results:', results)
-			results = results.filter(x => x)
-			queriedNodes = queriedNodes.union(nodesToQuery)
-			allNodes = allNodes.union( new NSet(flatten(results.filter(x => x).map(x => x[1]))) )
-			peers.concat(flatten(results.map(x => x[0]))) 
-			nodesToQuery = new NSet(Array.from(allNodes).sort(xorCompare(infoHash)).slice(0,8)).difference(queriedNodes)
+			let [peers, nodes] = this.getPeers(nodeID)
+			//if(nodeID == this.myNodeID) 
+			//	node = undefined
 
-			/*if(lastIter) {
-				if ( nodesToQuery.size == 0 )
-					break
-				else 
-					lastIter = false
+			let allNodes = new NSet(nodes), queriedNodes = new NSet()
+			let kClosest = nodes, kClosestCount = 0
+
+			var query = (node) => {
+				//console.log("querying:", node)
+				if(kClosestCount >= 8)
+					return
+
+				queriedNodes.add(node)
+
+				this.getNode(node).getPeers(nodeID).then( result => {
+
+					let [peers, nodes] = result
+					//result = result.filter( id => id != this.myNodeID )
+					allNodes = allNodes.union(new NSet(nodes))
+					querySuccess(peers, nodes)
+
+				}).catch( (err) => { 
+					console.log(err)
+					queryFail(node)
+				
+				})
+
 			}
 
-			if(nodesToQuery.size == 0) {
-				nodesToQuery = Array.from(allNodes.difference(queriedNodes)).sort(xorCompare(infoHash)).slice(0,8)
-				lastIter = true
-			}*/
+			var successTest = (peers, nodes) => {
 
-		}
+				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
+				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
+					kClosestCount++
+				else 
+					kClosestCount = 0
+				
+				kClosest = closestSoFar
+				
+				console.log("myNodeID:", this.myNodeID, kClosestCount)
+				console.log("kClosest:", kClosest.sort( xorCompareIDs(nodeID) ))
 
-		return [peers.filter(x => x), Array.from(allNodes).sort(xorCompare(infoHash)).slice(0,8)]
+				if(kClosestCount >= 8)
+					resolve([null, kClosest]) //called only once
+				if(peers) {
+					kClosestCount = 8
+					resolve([peers, kClosest])
+				}
 
+			}
+
+			var querySuccess = (peers, nodes) => {
+
+				if(kClosestCount >= 8)
+					return
+
+				successTest(peers, nodes)
+
+				let closestUnqueried = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 8)
+				closestUnqueried.slice(0,1).forEach(node => query(node))
+
+			}
+
+			var queryFail = (node) => {
+
+				if(kClosestCount >= 8)
+					return
+
+				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
+
+			}
+
+			allNodes.forEach( node => query(node) )
+
+		})
+		
+		//return [node, Array.from(allNodes).sort(xorCompare(infoHash)).slice(0,8)]
+	
 	}
 
 	getPeers(infoHash) {
 
 		let [node, nodes, hasMyNode] = this._getClosestNodes(infoHash)
-		let peers = []
+		let peers// = []
 		if(hasMyNode)
 			peers = this.infoHashes[infoHash]
 		return [peers, nodes]
@@ -304,23 +393,21 @@ class DHT {
 		let nodeIDs = flatten(this.buckets.map(bucket => bucket.getBucketNodeIDs())) //.reduce((a,b) => a.concat(b))
 		
 		nodeIDs.sort(xorCompareIDs(id))
-		let kClosestNodeIDs = nodeIDs.slice(10)
+		let kClosestNodeIDs = nodeIDs.slice(0, 10)
 
 		let node, myNode, hasMyNodeID
 
-		let pos = kClosestNodeIDs.findIndex((nodeID) => nodeID == id)
-
+		let pos = kClosestNodeIDs.findIndex( (nodeID) => nodeID == id )
 		if(pos != -1)
-			node = this.getNode(kClosestNodeIDs.splice(pos, 1)[0])
+			node = kClosestNodeIDs.splice(pos, 1)[0]
 
-		pos = kClosestNodeIDs.findIndex(nodeID => this.myNodeID == id )
-
+		pos = kClosestNodeIDs.findIndex( nodeID => nodeID == this.myNodeID )
 		if(pos != -1) {
 			kClosestNodeIDs.splice(pos, 1)
 			hasMyNodeID = true
 		}
 
-		return [node, nodeIDs.slice(0, 8), hasMyNodeID]
+		return [node, kClosestNodeIDs.slice(0, 8), hasMyNodeID]
 
 	}
 
@@ -373,7 +460,7 @@ class DHT {
 		if(!bucket.isFull() || bucket.has(this.myNodeID)) return 
 
 		let quesNodeIDs = bucket.getBucketNodeIDs().filter( (id) => this.getNode(id).state != NODE_STATE.GOOD)
-		quesNodeIDs.sort( (id) => this.getNode(id).lastReqTime - this.getNode(id).lastRespTime)
+		quesNodeIDs.sort( (id1, id2 ) => this.getNode(id1).lastRespReq - this.getNode(id2).lastRespReq )
 
 		let aQuesNodeID = quesNodeIDs.shift()
 
@@ -427,25 +514,25 @@ class DHT {
 			let node = this.getNode(makeNode(queryNodeID, rinfo.port, rinfo.address)) //if id in dht returns existing node
 
 			switch(request.q.toString()) {
-			case 'ping' :
-				response = this._respPing(request)
-				this._sendResponse(response, node.port, node.host)
-				break
-			case 'find_node' :
-				response = this._respFindNode(request)
-				this._sendResponse(response, node.port, node.host)
-				break
-			case 'get_peers' :
-				response = this._respGetPeers(request)
-				this._sendResponse(response, node.port, node.host)
-				break
-			case 'announce_peer' :
-				response = this._respAnnounce(req, rinfo.port, rinfo.address)
-				this._sendResponse(response, node.port, node.host)
-				break
-			default :
-				response = {'t':request.t, 'y':'e', 'e':[204, "Method Unknown"]}
-				this._sendResponse(response, node.port, node.host)
+				case 'ping' :
+					response = this._respPing(request)
+					this._sendResponse(response, node.port, node.host)
+					break
+				case 'find_node' :
+					response = this._respFindNode(request)
+					this._sendResponse(response, node.port, node.host)
+					break
+				case 'get_peers' :
+					response = this._respGetPeers(request)
+					this._sendResponse(response, node.port, node.host)
+					break
+				case 'announce_peer' :
+					response = this._respAnnounce(req, rinfo.port, rinfo.address)
+					this._sendResponse(response, node.port, node.host)
+					break
+				default :
+					response = {'t':request.t, 'y':'e', 'e':[204, "Method Unknown"]}
+					this._sendResponse(response, node.port, node.host)
 			}
 		} 
 	}
@@ -516,7 +603,14 @@ class Bucket {
 		this.min = min //[min, max)
 		this.max = max
 		this.nodeIDs = []
+		this.lastInsertTime = null
 
+	}
+
+	get lastChanged() {
+
+		return this.lastInsertTime
+	
 	}
 
 	fits(id) { //nodeID or infoHash
@@ -546,6 +640,7 @@ class Bucket {
 
 	insert(nodeID) {
 
+		this.lastInsertTime = Date.now()
 		this.nodeIDs.push(nodeID)
 		this.nodeIDs.sort((nodeID1, nodeID2) => parseInt('0x'+nodeID1) - parseInt('0x'+nodeID2))
 
@@ -641,9 +736,31 @@ class Node {
 	
 	}
 
+	get lastRespReq() {
+
+		return Math.max(this.lastQueryTime, this.lastRespTime)
+
+	}
+
 	parsePeerContactInfos(compactInfos, nodeID) {
 
-		return compactInfos.map(info => new Peer(info.slice(0,2), info.slice(2,6), nodeID))
+		var slicer = (buf) => {
+			let slices = []
+			while(buf.length > 0) {
+				slices.push(buf.slice(0, 6))
+				buf = buf.slice(6)
+			}
+			return slices
+		}
+
+		return compactInfos.map(info => {
+
+			let parsedHost = info.slice(0,4).toString('hex').match(/.{2}/g).map( num => Number('0x' + num)).join('.') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
+			let parsedPort = info.slice(4, 6).readUInt16BE()
+
+			return new Peer(parsedPort, parsedHost, nodeID.toString('hex'))
+
+		})
 
 	}
 
@@ -670,7 +787,7 @@ class Node {
 	resetQueryTimer() {
 
 		clearTimeout(this.queryTimer)
-		this.lastReqTime = Date.now()
+		this.lastQueryTime = Date.now()
 		self = this
 		this.queryTimer = setTimeout(()=>{self.query15min = false}, 15 * 60 * 1e3)
 
@@ -729,7 +846,7 @@ class Node {
 
 			response = await this._sendRequest(request)
 			let tNode = response
-			return this.parseNodeContactInfos(response.r.nodes)
+			return this.parseNodeContactInfos(response.r.nodes) //returns list not pair
 
 		} catch (error) {
 
@@ -753,21 +870,24 @@ class Node {
 		try {
 
 			response = await this._sendRequest(request)
-			console.log("response",response)
+			//console.log("response",response)
 			this.token = response.r.token
-			let peer, nodes
+			let peers, nodes
 		
-			if(response.r.values)
-				peers = this.parsePeerContactInfos(response.r.values, response.r.id)
 			if(response.r.nodes)
 				nodes = this.parseNodeContactInfos(response.r.nodes)
+			if(response.r.values)
+				peers = this.parsePeerContactInfos(response.r.values, response.r.id)
+			//console.log(peers)
 			return [ peers, nodes ]
 
-		} catch( error) {
+		} catch( error ) {
+
 			if(error instanceof TimeoutError) 
 				this.numNoResp++
-				
-			return false
+			
+			throw error
+
 		}
 
 	}
