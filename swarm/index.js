@@ -366,7 +366,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 util.inherits(Downloader, EventEmitter)
 
-Downloader.prototype.setMetaInfoFile = function (metaInfoFilePath) {
+Downloader.prototype.setMetaInfoFile = async function (metaInfoFilePath) {
 	
 	if(!fs.existsSync(metaInfoFilePath))
 		return
@@ -377,7 +377,7 @@ Downloader.prototype.setMetaInfoFile = function (metaInfoFilePath) {
 
 	this.fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
 	
-	this.setMetaInfo(benEncode(info)).catch(err => console.log(err))
+	return await this.setMetaInfo(benEncode(info))//.catch(err => console.log(err))
 	
 }
 
@@ -440,12 +440,13 @@ Downloader.prototype.setMetaInfo = async function (info) {
 
 	}
 
-	this.seeding = this.pieces.size == fileMetaData.numPieces
+	return this.seeding = this.pieces.size == fileMetaData.numPieces
 
 }
 
-Downloader.prototype.start = async function() {
+Downloader.prototype.start = function() {
 
+	//dont start until metaData filled - pieces checked
 	if(this.seeding)
 		this.seed()
 	else

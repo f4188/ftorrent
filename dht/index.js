@@ -9,30 +9,29 @@ benEncode = require('bencode').encode
 Peer = require('../lib/PeerInfo.js').PeerInfo
 NSet = require('../lib/NSet.js').NSet
 
+const LOG = true
+
 const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
 
 var flatten = (list) => list.reduce((a,b) => a.concat(b), []) 
 
-//var	xorCompare = (id) => (nodeID1, nodeID2) => parseInt(xor(nodeID1 , id).toString('hex'), 16) > parseInt(xor(nodeID2 , id).toString('hex'), 16)
-//var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1, 'hex') , new Buffer(id, 'hex')).toString('hex'), 16) - parseInt(xor(new Buffer(node2, 16) , new Buffer(id, 16)).toString('hex'), 16)
-//var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor( new Buffer(node1, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16) - parseInt( xor(new Buffer(node2, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16)
-
-//var	xorCompareIDStrings = (id) => (node1, node2) => parseInt(node1, 16) ^  parseInt(id, 16) - parseInt(node2, 16) ^  parseInt(id, 16)
 var xorCompare = (id) => (n1, n2) => {
-	let c1 = xor(new Buffer(n1, 'hex'), new Buffer(id, 'hex'))
-	let c2 = xor(new Buffer(n2, 'hex'), new Buffer(id, 'hex'))
+
+	let idBuf =  new Buffer(id, 'hex')
+	let c1 = xor(new Buffer(n1, 'hex'), idBuf)
+	let c2 = xor(new Buffer(n2, 'hex'), idBuf)
+
 	if( c1 < c2) 
 		return -1
 	else if(c1 > c2) 
 		return 1
 	else if(c1.equals(c2))
 		return 0
+
 }
+
 var xorCompareIDStrings = xorCompare
 var xorCompareIDs = xorCompare
-//var xorCompare = xorCompareIDStrings
-var xorCompareIDs = xorCompare
-var xorCompareIDStrings = xorCompare
 
 var makeNode
 
@@ -315,8 +314,6 @@ class DHT {
 
 				}).catch( (err) => { 
 
-					console.log(err)
-
 					if( err instanceof TimeoutError && i++ < 3) { 
 						query(node, i)
 					} else 
@@ -337,8 +334,10 @@ class DHT {
 				
 				kClosest = closestSoFar
 				
-				console.log("myNodeID:", this.myNodeID, kClosestCount, workers)
-				console.log("kClosest:", kClosest )
+				if(LOG) {
+					console.log("myNodeID:", this.myNodeID, kClosestCount, workers)
+					console.log("kClosest:", kClosest )
+				}
 
 				if(kClosestCount >= 8 ) {
 					kClosestCount = 8
@@ -401,7 +400,7 @@ class DHT {
 					querySuccess(peers, nodes)
 
 				}).catch( (err) => { 
-					//console.log(err)
+
 					queryFail(node)
 				
 				})
@@ -419,7 +418,7 @@ class DHT {
 				kClosest = closestSoFar
 				if(peers)
 					allPeers = allPeers.concat(peers)
-				console.log(peers)
+				//console.log(peers)
 			
 				if(kClosestCount >= 8)
 					//exit when 50 peers ??
@@ -459,7 +458,7 @@ class DHT {
 	getPeers(infoHash) {
 
 		let [node, nodes, hasMyNode] = this._getClosestNodes(infoHash)
-		let peers// = []
+		let peers
 		if(hasMyNode)
 			peers = this.infoHashes[infoHash]
 		return [peers, nodes]
@@ -475,7 +474,7 @@ class DHT {
 
 	_getClosestNodes(id) { 
 
-		let nodeIDs = flatten(this.buckets.map(bucket => bucket.getBucketNodeIDs())) //.reduce((a,b) => a.concat(b))
+		let nodeIDs = flatten(this.buckets.map(bucket => bucket.getBucketNodeIDs()))
 		
 		nodeIDs.sort(xorCompareIDs(id))
 		let kClosestNodeIDs = nodeIDs.slice(0, 10)
@@ -502,7 +501,7 @@ class DHT {
 
 	}
 
-	insertNodeInDHT(nodeID) { //only called by makeNode - only called for new and unique nodes
+	insertNodeInDHT(nodeID) { //only called by makeNode 
 
 		let node = this.getNode(nodeID)
 		let bucket = this._findBucketFits(nodeID)
@@ -552,7 +551,12 @@ class DHT {
 
 			bucket.worker = 0
 			if(bucket.queue.length > 0) {
-				if(i > 100) return
+
+				if(i > 100) {
+					bucket.queue = []
+					return
+				}
+
 				let nextNodeID = bucket.queue.shift()
 				this.replaceNodesInDHT(nextNodeID, i)
 
@@ -670,7 +674,7 @@ class DHT {
 		let response
 				
 		if(request.y == 'q') {
-			this.req = request
+			//this.req = request
 
 			let queryNodeID = request.a.id.toString('hex')
 
@@ -691,7 +695,7 @@ class DHT {
 					this._sendResponse(response, node.port, node.host)
 					break
 				case 'announce_peer' :
-					response = this._respAnnounce(req, rinfo.port, rinfo.address)
+					response = this._respAnnounce(request, rinfo.port, rinfo.address)
 					this._sendResponse(response, node.port, node.host)
 					break
 				default :
@@ -763,18 +767,13 @@ class Bucket {
 
 	constructor(min, max) {
 
-		this.min = min //[min, max)
+		this.min = min
 		this.max = max
 		this.nodeIDs = []
 		this.lastInsertTime = null
 		this.worker = 0
 		this.queue = []
 		this.everSeenSet = new NSet()
-		this.err = false
-
-		//var handleErr = () => {
-
-		//}
 
 	}
 
@@ -786,7 +785,7 @@ class Bucket {
 
 	fits(id) { //nodeID or infoHash
 
-		let num = parseInt('0x' + id)//Buffer.from(id).toString('hex'))
+		let num = parseInt('0x' + id)
 		return num >= this.min && num < this.max 
 
 	}
@@ -1032,7 +1031,6 @@ class Node {
 
 	}
 
-	//used to get peer contacts
 	async getPeers(infoHash) {
 
 		let transactID = crypto.randomBytes(2)
