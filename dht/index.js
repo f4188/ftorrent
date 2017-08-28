@@ -6,7 +6,7 @@ xor = require('buffer-xor')
 benDecode = require('bencode').decode
 benEncode = require('bencode').encode
 
-Peer = require('../lib/peerinfo.js').PeerInfo
+Peer = require('../lib/Peerinfo.js').PeerInfo
 NSet = require('../lib/NSet.js').NSet
 
 const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
