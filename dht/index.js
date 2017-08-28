@@ -14,12 +14,25 @@ const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
 var flatten = (list) => list.reduce((a,b) => a.concat(b), []) 
 
 //var	xorCompare = (id) => (nodeID1, nodeID2) => parseInt(xor(nodeID1 , id).toString('hex'), 16) > parseInt(xor(nodeID2 , id).toString('hex'), 16)
-//var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1.nodeID, 'hex') , id).toString('hex'), 16) - parseInt(xor(new Buffer(node2.nodeID, 16) , id).toString('hex'), 16)
+//var	xorCompare = (id) => (node1, node2) => parseInt(xor(new Buffer(node1, 'hex') , new Buffer(id, 'hex')).toString('hex'), 16) - parseInt(xor(new Buffer(node2, 16) , new Buffer(id, 16)).toString('hex'), 16)
 //var	xorCompareIDs = (id) => (node1, node2) => parseInt(xor( new Buffer(node1, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16) - parseInt( xor(new Buffer(node2, 'hex') , new Buffer(id, 'hex') ).toString('hex'), 16)
 
-var	xorCompareIDStrings = (id) => (node1, node2) => parseInt(node1, 16) ^ parseInt(id, 16) - parseInt(node2, 16) ^ parseInt(id, 16)
-var xorCompareIDs = xorCompareIDStrings
-var xorCompare = xorCompareIDStrings
+//var	xorCompareIDStrings = (id) => (node1, node2) => parseInt(node1, 16) ^  parseInt(id, 16) - parseInt(node2, 16) ^  parseInt(id, 16)
+var xorCompare = (id) => (n1, n2) => {
+	let c1 = xor(new Buffer(n1, 'hex'), new Buffer(id, 'hex'))
+	let c2 = xor(new Buffer(n2, 'hex'), new Buffer(id, 'hex'))
+	if( c1 < c2) 
+		return -1
+	else if(c1 > c2) 
+		return 1
+	else if(c1.equals(c2))
+		return 0
+}
+var xorCompareIDStrings = xorCompare
+var xorCompareIDs = xorCompare
+//var xorCompare = xorCompareIDStrings
+var xorCompareIDs = xorCompare
+var xorCompareIDStrings = xorCompare
 
 var makeNode
 
@@ -70,6 +83,9 @@ class DHT {
 
 		this.refreshLoop = null
 
+		this.repNodeWorkers = 0
+		this.repNodeQueue = []
+
 		let self = this
 
 		var _tokenUpdater = function tknUpdtr() {
@@ -89,7 +105,7 @@ class DHT {
 		var _makeNode = () => {
 
 			return (nodeID, port, host) => {
-				//console.log('nodeID',nodeID)
+
 				let node = this.nodes.get(nodeID)
 
 				if(!node) {
@@ -103,7 +119,7 @@ class DHT {
 
 				}
 			
-				if(!this._inDHT(nodeID)) 
+				if(node.state != NODE_STATE.BAD && !this._inDHT(nodeID)) 
 
 					this.insertNodeInDHT(nodeID)
 				
@@ -118,15 +134,59 @@ class DHT {
 
 	}
 
+	forceRefreshBuckets() {
+
+		this.buckets.forEach( bucket => {
+
+			bucket.worker = 0
+			bucket.queue = []
+			bucket.everSeenSet = new NSet()
+
+			let rand = Math.floor(Math.random() * bucket.nodeIDs.length)
+			let node 
+
+			if(bucket.nodeIDs.length == 0) {
+				let min = bucket.min
+				let max = bucket.max
+				let randIDNum = min + Math.random() * (max - min)
+				let randID = randIDNum.toString(16)
+				node = Buffer.from(randID, 'hex')
+			} else {
+				node = bucket.nodeIDs[rand]
+			}
+
+			this.findNodeIter(node).catch( err => console.log("Refresh:", err))	
+
+		})
+
+	}
+
 	refreshBuckets() {
 
 		this.buckets.forEach( bucket => {
 
-			let lastChanged = Math.max(bucket.lastChanged, ...bucket.nodeIDs.map( nodeID => this.getNode(nodeID).lastChanged ))
+			bucket.worker = 0
+			bucket.queue = []
+			bucket.everSeenSet = new NSet()
+
+			let lastChanged = Math.max(bucket.lastChanged, ...(bucket.nodeIDs.map( nodeID => this.getNode(nodeID).lastRespReq )))
 			
 			if(Date.now() - lastChanged > 15 * 60 * 1e3) {
-				let rand = Math.floor(Math.random() * this.bucket.nodeIDs.length)
-				this.findNodeIter(bucket.nodeIDs[rand]).catch( err => console.log("Refresh:", err))	
+
+				let rand = Math.floor(Math.random() * bucket.nodeIDs.length)
+				let node 
+
+				if(bucket.nodeIDs.length == 0) {
+					let min = bucket.min
+					let max = bucket.max
+					let randIDNum = min + Math.random() * (max - min)
+					let randID = randIDNum.toString(16)
+					node = Buffer.from(randID, 'hex')
+				} else {
+					node = bucket.nodeIDs[rand]
+				}
+
+				this.findNodeIter(node).catch( err => console.log("Refresh:", err))	
 			}
 
 		})
@@ -176,10 +236,10 @@ class DHT {
 		let bootstrapNodeAddrs = [[6881, 'router.bittorrent.com'], [6881, 'dht.transmissionbt.com'], [6881, 'router.utorrent.com']]
 		
 		let ips = await Promise.race(bootstrapNodeAddrs.map( node =>  this.lookup(node[1])))
-
+		console.log('ip:', ips)
 		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock) //do not insert in routing table
 
-		let nodes
+		let nodes, node
 		let tries = 0
 
 		//while( tries++ < 5 && !nodes) {
@@ -187,7 +247,7 @@ class DHT {
 
 			try {
 
-				nodes = await bootStrapNode.findNode(this.myNodeID) // inserts nodes in dht 
+				[[node], nodes] = await bootStrapNode.findNode(this.myNodeID) // inserts nodes in dht 
 			
 			} catch (error) {
 
@@ -228,34 +288,46 @@ class DHT {
 		return new Promise( (resolve, reject) => {
 
 			let [[node], nodes] = this.findNode(nodeID)
-			//if(nodeID == this.myNodeID) 
-			//	node = undefined
 
 			let allNodes = new NSet(nodes), queriedNodes = new NSet()
 			let kClosest = nodes, kClosestCount = 0
+			//let dead = 0
+			let workers = 0
 
-			var query = (node) => {
+			var query = (node, i) => {
 
+				queriedNodes.add(node)
 				if(kClosestCount >= 8)
 					return
 
-				queriedNodes.add(node)
+				if(this.getNode(node).state == NODE_STATE.BAD) {
+					nextQuery(node)
+					return
+				}
 
-				this.getNode(node).findNode(nodeID).then( result => {
-
+				this.getNode(node).findNode(nodeID).then( pair => {
+					let [[node], result] = pair
+					result = result.filter( id => this.getNode(id).state != NODE_STATE.BAD)
 					result = result.filter( id => id != this.myNodeID )
 					allNodes = allNodes.union(new NSet(result))
-					querySuccess()
+					successTest(node)
+					nextQuery()
 
 				}).catch( (err) => { 
 
-					queryFail(node)
+					console.log(err)
+
+					if( err instanceof TimeoutError && i++ < 3) { 
+						query(node, i)
+					} else 
+						//node is bad
+						nextQuery()
 				
 				})
 
 			}
 
-			var successTest = () => {
+			var successTest = (n) => {
 
 				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
 				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
@@ -265,40 +337,42 @@ class DHT {
 				
 				kClosest = closestSoFar
 				
-				//console.log("myNodeID:", this.myNodeID, kClosestCount)
-				//console.log("kClosest:", kClosest.sort( xorCompareIDs(nodeID) ))
+				console.log("myNodeID:", this.myNodeID, kClosestCount, workers)
+				console.log("kClosest:", kClosest )
 
-				if(kClosestCount >= 8)
+				if(kClosestCount >= 8 ) {
+					kClosestCount = 8
 					resolve([null, kClosest]) //called only once
-				if(closestSoFar.findIndex( id => id == nodeID) != -1) {
+				}
+
+				//if(closestSoFar.findIndex( id => id == nodeID) != -1 ) {
+				if(n) {
 					kClosestCount = 8
 					resolve([nodeID, kClosest])
 				}
 
 			}
 
-			var querySuccess = () => {
+			var nextQuery = (node) => {
 
-				if(kClosestCount >= 8)
+				if(kClosestCount >= 8 )
 					return
 
-				successTest()
+				let nextNodes = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID))
 
-				let closestUnqueried = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 8)
-				closestUnqueried.slice(0,1).forEach(node => query(node))
+				workers--
+				console.log('nextQuery', workers, nextNodes.length )
+				let k = Math.max(Math.min(8 - workers, nextNodes.length), 0)
+
+				nextNodes = nextNodes.slice(0, k)
+				workers += k
+
+				nextNodes.forEach(node => query(node, 0))
 
 			}
 
-			var queryFail = (node) => {
-
-				if(kClosestCount >= 8)
-					return
-
-				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
-
-			}
-
-			allNodes.forEach( node => query(node) )
+			workers = allNodes.size
+			allNodes.forEach( node => query(node, 0) )
 
 		})
 			
@@ -316,10 +390,9 @@ class DHT {
 
 			var query = (node) => {
 
+				queriedNodes.add(node)
 				if(kClosestCount >= 8)
 					return
-
-				queriedNodes.add(node)
 
 				this.getNode(node).getPeers(nodeID).then( result => {
 
@@ -349,6 +422,7 @@ class DHT {
 				console.log(peers)
 			
 				if(kClosestCount >= 8)
+					//exit when 50 peers ??
 					resolve([allPeers, kClosest]) //called only once
 
 			}
@@ -428,7 +502,7 @@ class DHT {
 
 	}
 
-	insertNodeInDHT(nodeID) {
+	insertNodeInDHT(nodeID) { //only called by makeNode - only called for new and unique nodes
 
 		let node = this.getNode(nodeID)
 		let bucket = this._findBucketFits(nodeID)
@@ -458,17 +532,71 @@ class DHT {
 
 			this.buckets.push(bucket)
 
-		} else { //doesn't already contain node and is full
-
-			//this.replaceNodesInDHT(nodeID, node, bucket)
+		} else { 
+			//bucket is full and does not have myNode
+				this.replaceNodesInDHT(nodeID, 0) //do no await - return on ping
 
 		}
 		
 	}
 
-	async replaceNodesInDHT (nodeID, node, bucket) {
+	async replaceNodesInDHT (nodeID, i) {
 
-		if(!bucket.isFull() || bucket.has(this.myNodeID)) return 
+		let node = this.getNode(nodeID)
+		let bucket = this._findBucketFits(nodeID)
+
+		if(bucket.nodeIDs.every( id => this.getNode(id).good )  && bucket.isFull())
+			return
+
+		var finish = () => {
+
+			bucket.worker = 0
+			if(bucket.queue.length > 0) {
+				if(i > 100) return
+				let nextNodeID = bucket.queue.shift()
+				this.replaceNodesInDHT(nextNodeID, i)
+
+			}
+
+		}
+
+		if(bucket.worker > 0) {
+
+			if(bucket.everSeenSet.has(nodeID))
+				return
+
+			bucket.everSeenSet.add(nodeID)
+			bucket.queue.push(nodeID) //already unique
+			
+			let s = new NSet(bucket.queue) //remove duplicate
+			bucket.queue = Array.from(s)
+			
+			return
+
+		}
+
+		bucket.worker = 1
+		///////////////////////////////
+
+		if(bucket.nodeIDs.every( id => this.getNode(id).good ) || !bucket.isFull() 
+			|| bucket.has(this.myNodeID) || node.state == NODE_STATE.BAD || bucket.has(nodeID)) {
+				finish()
+				return
+		}
+
+		try {
+
+			let ms = await node.ping()
+
+		} catch( error ) {
+
+			if(error instanceof TimeoutError || error instanceof KRPCError) {
+				finish()
+				return
+			} else 
+				throw error
+	
+		} 
 
 		let quesNodeIDs = bucket.getBucketNodeIDs().filter( (id) => this.getNode(id).state != NODE_STATE.GOOD)
 		quesNodeIDs.sort( (id1, id2 ) => this.getNode(id1).lastRespReq - this.getNode(id2).lastRespReq )
@@ -479,16 +607,27 @@ class DHT {
 
 			try {
 
-				await this.getNode(aQuesNodeID).ping()
+				let ms = await this.getNode(aQuesNodeID).ping()
 				
 			} catch (error) {
 
-				bucket.remove(aQuesNodeID)
+				if(error instanceof TimeoutError || error instanceof KRPCError) {
+					bucket.remove(aQuesNodeID)
 
-				if(!bucket.has(nodeID) & !bucket.isFull())
-					bucket.insert(nodeID)
+					if(!bucket.has(nodeID) & !bucket.isFull())
+						bucket.insert(nodeID)
 
-				return 
+					if(bucket.nodeIDs.every( id => this.getNode(id).good ) && bucket.isFull()) {
+						bucket.worker = 0
+						bucket.queue = []
+						return
+					}
+					
+					finish()
+					return 
+
+				} else 
+					throw error
 
 			}
 
@@ -496,7 +635,10 @@ class DHT {
 
 		}
 
+		finish()
+
 	}
+
 
 	_inDHT(id) {
 
@@ -533,6 +675,7 @@ class DHT {
 			let queryNodeID = request.a.id.toString('hex')
 
 			let node = this.getNode(makeNode(queryNodeID, rinfo.port, rinfo.address)) //if id in dht returns existing node
+			node.resetQueryTimer()
 
 			switch(request.q.toString()) {
 				case 'ping' :
@@ -574,14 +717,14 @@ class DHT {
 	_respFindNode(request) {
 
 		let [[nodeID], nodeIDs] = this.findNode(request.a.target.toString('hex')) //node is targetnode if present in dht
-		let contactInfoString
+		let contactInfos
 
-		if(nodeID != request.a.id && this.getNode(nodeID)) //if have node different from query node, return only that node
-			contactInfoString = this.getNode(nodeID).getContactInfo() 
-		else 
-			contactInfoString = nodeIDs.map( id => this.getNode(id).getContactInfo() ).join("")
+		if(nodeID != request.a.id && this.getNode(nodeID)) //if node querying itself, return list of nodes
+			contactInfos = [this.getNode(nodeID).getContactInfo()]
+		else if(nodeIDs)
+			contactInfos = nodeIDs.map( id => this.getNode(id).getContactInfo() ) //.join("")
 
-		return {'t': request.t, 'y':'r', 'r': {'id' : new Buffer(this.myNodeID, 'hex'), 'nodes': contactInfoString}}
+		return {'t': request.t, 'y':'r', 'r': {'id' : new Buffer(this.myNodeID, 'hex'), 'nodes': contactInfos}}
 
 	}
 
@@ -591,7 +734,7 @@ class DHT {
 		let response = {'t': request.t, 'y':'r', 'r' : {'id' : new Buffer(this.myNodeID, 'hex'), 'token': this.getToken(this.host) }}
 		
 		if(peers)
-			response.r.values = peers.map(peer => peer.getContactInfo())
+			response.r.values = peers.map(peer => peer.getContactInfoBuffer())
 
 		response.r.nodes = nodeIDs.map( id => this.getNode(id).getContactInfo()).join("") 
 
@@ -624,6 +767,14 @@ class Bucket {
 		this.max = max
 		this.nodeIDs = []
 		this.lastInsertTime = null
+		this.worker = 0
+		this.queue = []
+		this.everSeenSet = new NSet()
+		this.err = false
+
+		//var handleErr = () => {
+
+		//}
 
 	}
 
@@ -668,8 +819,9 @@ class Bucket {
 
 	remove(nodeID) {
 
-		let pos = this.nodeIDs.findIndex( id => id == nodeID)
-		this.nodeIDs.splice(pos, 1)
+		let pos = this.nodeIDs.findIndex( id => id == nodeID )
+		if(pos != -1)
+			this.nodeIDs.splice(pos, 1)
 
 	}
 
@@ -704,25 +856,21 @@ class Bucket {
 
 class Node {
 
-	constructor(nodeID, port, host, myNodeID, sock) {//, dht) {
+	constructor(nodeID, port, host, myNodeID, sock) {
 
 		this.nodeID = nodeID
 		this.port = port
 		this.host = host
-		this.myNodeID = myNodeID//dht.myNodeID
+		this.myNodeID = myNodeID
 		this.sock = sock
 		this.default_timeout = 2000
-
-		//only if in dht or questionable list
 		this.everResp = false // ever
 		this.resp15min = false //15 mins
 		this.query15min = false //15 mins
-		this.lastQueryTime
-		this.lastRespTime
+		this.lastQueryTime = 0
+		this.lastRespTime = 0
 		this.respTimer
 		this.queryTimer
-		this.good = this.resp15min || (this.everResp && this.query15min)
-		this.bad = false
 		this.numNoResp = 0
 
 		this.parseNodeContactInfos = function parseNodeInfos(compactInfos) {
@@ -747,6 +895,12 @@ class Node {
 
 		}
 	
+	}
+
+	get good() {
+
+		return this.resp15min || (this.everResp && this.query15min)
+
 	}
 
 	get lastRespReq() {
@@ -779,13 +933,13 @@ class Node {
 
 	get state() {
 
-		if(this.bad) return NODE_STATE.BAD
-		if(this.numNoResp > 4) return NODE_STATE.BAD
+		if(this.numNoResp > 4) 
+			return NODE_STATE.BAD
+
 		if(this.good) 
-			return NODE_STATE.GOOD
-		else 
-			return NODE_STATE.QUES
-		  //this.bad only when insertNodeInDHT pings ques nodes or when dht attempts to query node	
+			return NODE_STATE.GOOD 
+		
+		return NODE_STATE.QUES
 
 	}
 
@@ -799,9 +953,10 @@ class Node {
 
 	resetQueryTimer() {
 
-		clearTimeout(this.queryTimer)
+		let self = this
+		clearTimeout(self.queryTimer)
 		this.lastQueryTime = Date.now()
-		self = this
+		this.query15min = true
 		this.queryTimer = setTimeout(()=>{self.query15min = false}, 15 * 60 * 1e3)
 
 	}
@@ -811,8 +966,9 @@ class Node {
 		let self = this
 		clearTimeout(self.respTimer)
 		this.everResp = true
+		this.resp15min = true
 		this.lastRespTime = Date.now()
-		this.respTimer = setTimeout(() => {self.respTimer = false}, 15 * 60 * 1e3)
+		this.respTimer = setTimeout(() => {self.resp15min = false}, 15 * 60 * 1e3)
 
 	}
 
@@ -833,9 +989,9 @@ class Node {
 		let then = Date.now()
 
 		try {
-
+			
 			response = await this._sendRequest(request)
-		
+			this.numNoResp = 0
 			return Date.now() - then
 
 		} catch(error) {
@@ -858,8 +1014,12 @@ class Node {
 		try {
 
 			response = await this._sendRequest(request)
-			let tNode = response
-			return this.parseNodeContactInfos(response.r.nodes) //returns list not pair
+			this.numNoResp = 0
+			let nodes = this.parseNodeContactInfos(response.r.nodes) //returns list not pair
+			if(this.nodeID == targetNodeID)
+				return [[targetnode], nodes]
+			else
+				return [[undefined], nodes] 
 
 		} catch (error) {
 
@@ -880,8 +1040,9 @@ class Node {
 		let response
 		
 		try {
-
+			
 			response = await this._sendRequest(request)
+			this.numNoResp = 0
 			//console.log("response",response)
 			this.token = response.r.token
 			let peers, nodes
@@ -926,7 +1087,9 @@ class Node {
 			let timeout = setTimeout( ()=> {
 
 				self.sock.removeListener('message', listener)
-				reject("Timeout: " + self.default_timeout + " (ms)")
+				//throw new TimeoutError()
+				reject(new TimeoutError("Timeout: " + self.default_timeout + " (ms)"))
+				//throw new TimeoutError("Timeout: " + self.default_timeout + " (ms)")
 
 			} , this.default_timeout)
 
@@ -949,15 +1112,21 @@ class Node {
 					clearTimeout(timeout)
 					self.sock.removeListener('message', listener)
 
-					if(response.y.toString() == 'r') {
+					if(response.y && response.y.toString() == 'r') {
 
 						self.resetRespTimer()
 						resolve(response)
 
-					} else if(response.y.toString() == 'e')
+					} else if(response.y && response.y.toString() == 'e') {
 
-						reject(new KRPCError(response.e[0] + ": "+ response.e[1]))
+						if(response.e && Array.isArray(response.e) && response.e.length >= 2)
+							reject(new KRPCError(response.e[0] + ": "+ response.e[1]))
+						else 
+							reject(new KRPCError("???"))
+						//throw new new KRPCError(response.e[0] + ": "+ response.e[1])
 						//maybe set bad
+					} else 
+						reject(new KRPCError("??"))
 
 				}
 

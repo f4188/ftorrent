@@ -17,7 +17,7 @@ var readStreamFunc = async (path, start, end) => {
 	return new Promise( (resolve, reject) => {
 
 		pieceStream.on('readable', () => { 
-			let data = pieceStream.read(pieceLength)  
+			let data = pieceStream.read(end - start)  
 			if(data)
 				resolve(data) 
 		})
@@ -30,8 +30,8 @@ var Pieces = (file) => class Piece {
 		this.fileMetaData = file
 		this.hash = file.pieceHashes[index]
 
-		this.path = this.file //path to file on disk
-		this.pathList = this.file.pathList
+		this.path = file //path to file on disk
+		this.pathList = file.pathList
 		
 		this.fileLengthList = file.fileLengthList
 
@@ -44,20 +44,22 @@ var Pieces = (file) => class Piece {
 
 	readPiece() {
 
-		let start = pieceIdx * this.normalPieceLength, end = start + this.pieceLength
-		return readPiecelet(start, end)
+		//let start = this.index * this.normalPieceLength, end = start + this.pieceLength
+		let start = 0, end = this.pieceLength
+		return this.readPiecelet(start, end)
 
 	}
 
 	async readPiecelet(begin, length) {
 
-		let start = pieceIdx * this.normalPieceLength + begin, end = start + this.pieceLength + length
+		let start = this.index * this.normalPieceLength + begin, end = start + length
 
 		let metaData = this.fileMetaData
+		let chunks
 
 		let leftBound = 0, fileBounds = []
 
-		for(var i = 1 ; i < metaData.fileLengthList.length - 1; i++) {
+		for(var i = 0 ; i < metaData.fileLengthList.length; i++) {
 
 			let rightBound = leftBound + metaData.fileLengthList[i]
 			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
@@ -68,20 +70,23 @@ var Pieces = (file) => class Piece {
 
 		try {
 
-			let chunks = await Promise.all( fileBounds.map( bound => {
+			console.log(fileBounds)
+			chunks = await Promise.all( fileBounds.map( bound => {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
 				return readStreamFunc(metaData.pathList[bound[0]], chunkletStart, chunkletEnd)
 
 			}))
 
-		} catch (error) {
+			return Buffer.concat(chunks)
 
+		} catch (error) {
+			console.log(error)
 			return false
 
 		}
 
-		return Buffer.concat([chunks])
+		
 
 	}
 
@@ -90,7 +95,7 @@ var Pieces = (file) => class Piece {
 		let buf = await this.readPiece()
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
-
+		console.log(hash, this.hash)
 		return this.good = hash == this.hash
 
 	}

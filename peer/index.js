@@ -31,7 +31,7 @@ const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
 /* from fileMetaData
 numPieces
-pieces set
+pieces map
 infoSize
 activespieces
 peerID
@@ -64,8 +64,8 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	
 	this.pieces = new NSet() //pHave and pBitfield
 	
-	this.peerID = fileMetaData.peerID
-
+	this.peerID = null// = fileMetaData.peerID
+	this.myPeerID = null
 	//statistics 
 	//restart on reconnect?
 	//don't need rates here
@@ -98,7 +98,6 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	} else {
 
-		//console.log('connecting')
 		this.host = addr.host
 		this.port = addr.port
 
@@ -114,6 +113,8 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		})
 
 	}
+
+	var handleDisconnect = () => {}
 
 	this.sock.on('close', () => {
 
@@ -131,8 +132,6 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		self.emit('disconnected')
 
 	})
-
-	
 
 	this.msgHandlers = { 'handshake': (this.pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
 		[CHOKE_MSG_TYPE] : (this._pChoke).bind(this), [UNCHOKE_MSG_TYPE] : (this.pUnchoke).bind(this), 
@@ -229,7 +228,7 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 	this.peerID = peerID
 	this.supportsDHT = supportsDHT
 	this.supportsExten = supportsExten
-
+	console.log("handshake")
 	if(this.state != this.STATES.sent_hshake) //already sent handshake
 		this.handshake()
 
@@ -276,7 +275,7 @@ Peer.prototype.updateInterested = function() {
 
 	let activePieces = this.fileMetaData.activePieces
 
-	if(!this.interested && this.pieces.intersection(activePieces).size > 0)
+	if(!this.interested && this.pieces.intersection(new NSet(activePieces.keys())).size > 0)
 		this.interested()
 
 }
@@ -356,12 +355,13 @@ Peer.prototype.handshake = function() {
 	nt.writeUInt8(0x13)
 
 	let bitTorrent = Buffer.from('BitTorrent protocol')
-	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.peerID])
+	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.fileMetaData.peerID])
 	
 
 	//only check extension supported by this client
 	buf.writeUInt8(0x10, 25) 
 	buf.writeUInt8(0x01, 27)
+	console.log(buf)
 	this.push(buf)
 
 	this.exHandShake()
@@ -489,7 +489,7 @@ Peer.prototype.bitfield = function () {
 		bitField.writeUInt8(byte, Math.floor(pieceIndex / 8))
 
 	})
-
+	console.log(bitField)
 	this.push(this.makeMsg(BITFIELD_MSG_TYPE, bitField))
 
 }

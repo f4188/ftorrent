@@ -49,9 +49,9 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	//var host = url//new URL(url)
 
 	this.client = sock
-	this.address = net.isIP(url.hostname) ? this.address = urlhostname : this.address = null
-	this.host = host.hostname
-	this.port = url.port
+	this.address = net.isIP(url.hostname) ?  url.hostname : this.address = null
+	this.host = url.hostname
+	this.port = parseInt(url.port)
 
 	this.infoHash = infoHash
 	this.peerID = peerID
@@ -68,7 +68,7 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	this.connectID = null;
 	this.connectIDEx = null;
 	this.timeoutInterval = 3000
-	
+
 }
 
 UDPTracker.prototype._sendAnnounceRequest = function(request) {
@@ -138,7 +138,7 @@ UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
 
 	
 	if(!this.address)
-		this.address = await getAddr(this.hostname)
+		this.address = await getAddr(this.host)
 
 	try {
 

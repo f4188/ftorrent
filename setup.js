@@ -1,9 +1,9 @@
 
 
-Downloader = require('./fztorrent/swarm/index.js').Downloader
+Downloader = require('./swarm/index.js').Downloader
 
-var client1 = new Downloader(6008)
-client1.setupWithMetaInfoFile('../fztorrent/c_primer_5th_edition.torrent')
+var client1 = new Downloader(6012)
+client1.setMetaInfoFile('../c_primer_5th_edition.torrent')//.catch(x => console.log(x))
 
 
 //var client2 = new Downloader(6002)
