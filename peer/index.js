@@ -121,7 +121,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		self.state = this.STATES.disconnected
 		//clearout request queues
 		//self.emit('sock_closed')
-		self.emit('disconnected')
+		self.emit('disconnected', this)
 
 	})
 
@@ -129,7 +129,7 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 		self.state = this.STATES.disconnected
 		//self.emit('sock_closed')
-		self.emit('disconnected')
+		self.emit('disconnected', this)
 
 	})
 
@@ -178,7 +178,7 @@ Peer.prototype.piece = function(index, begin, piece) {
 		//p.unpipe(this.sock)
 		this.finishRequest() 
 		this.downloadTime += (Date.now() - this.sendPieceStart)
-		this.emit('piece_sent')
+		this.emit('piece_sent', this)
 
 	}).bind(this))
 
@@ -233,7 +233,7 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 		this.handshake()
 
 	this.state = this.STATES.connected
-	this.emit('connected')
+	this.emit('connected', this)
 
 	this.bitfield()
 	this.exHandShake()
@@ -316,7 +316,7 @@ Peer.prototype.fulfillRequest = function() { //expects pRequest to be null and p
 
 	this.pRequest = this.pRequestList.shift()
 
-	this.emit('peer_request', this.pRequest.index, this.pRequest.begin, this.pRequest.length)
+	this.emit('peer_request', this, this.pRequest.index, this.pRequest.begin, this.pRequest.length)
 
 }
 
@@ -326,7 +326,7 @@ Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, be
 	this.uploadBytes += piece.length
 	this.uploadTime += uploadTime
 
-	this.emit('peer_piece', index, begin, length, piece)
+	this.emit('peer_piece', this, index, begin, length, piece)
 
 }
 
