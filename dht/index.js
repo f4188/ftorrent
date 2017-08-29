@@ -10,7 +10,7 @@ benEncode = require('bencode').encode
 Peer = require('../lib/PeerInfo.js').PeerInfo
 NSet = require('../lib/NSet.js').NSet
 
-const LOG = true
+LOG = true
 
 const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
 
@@ -31,10 +31,22 @@ var xorCompare = (id) => (n1, n2) => {
 
 }
 
-var xorDistance = (id) => (nodeID) =>  parseInt(xor(new Buffer(nodeID, 'hex'), new Buffer(id, 'hex')), 16)
-
 var xorCompareIDStrings = xorCompare
 var xorCompareIDs = xorCompare
+
+var xorDistance = (id) => (nodeID) =>  parseInt(xor(new Buffer(nodeID, 'hex'), new Buffer(id, 'hex')), 16)
+
+var readStreamFunc = async (path) => {
+
+	return new Promise( (resolve, reject) => {
+
+		let fileStream = fs.createReadStream(path)
+		let fileData = new Buffer(0)
+		fileStream.on('data', (data) => { fileData = Buffer.concat([fileData, data]) } )
+		fileStream.on('end', () => { resolve(fileData) })
+
+	})
+}
 
 var makeNode
 
@@ -103,7 +115,7 @@ class DHT {
 
 		this.tokenInterval = setInterval(_tokenUpdater, 5*60*1e3)
 
-		var _makeNode = () => {
+		this._makeNode = () => {
 
 			return (nodeID, port, host) => {
 
@@ -128,10 +140,8 @@ class DHT {
 			}
 		}
 
-		this.makeNode = _makeNode()
+		this.makeNode = this._makeNode()
 		makeNode = this.makeNode
-
-		this.loadDHT()
 
 	}
 
@@ -203,9 +213,29 @@ class DHT {
 
 	}
 
-	//load dht from storage
-	loadDHT() {
-		//this.myNodeID = crypto.randomBytes(20)
+	saveDHT() {
+
+		let buckets = this.buckets.map( bucket => { return { range : [bucket.min, bucket.max], nodeIDs : bucket.nodeIDs } } ) 
+		let nodesInBuckets = this.buckets.map( bucket => bucket.nodeIDs).reduce( (list, nodeIDs) => list.concat(nodeIDs), [])
+		let nodeAddressBook = nodesInBuckets.reduce( ( soFar, id) => soFar[id] = { port : this.nodes.get(id).port, host : this.nodes.get(id).host } , {})
+		let saveFile = fs.createWriteStream('./saved_DHT')
+		saveFile.write(JSON.stringify({buckets : buckets, addressBook : nodeAddressBook, myNodeID : this.myNodeID}))
+		saveFile.end()
+
+	}
+
+	async loadDHT() {
+
+		let savedData = await readStreamFunc('./saved_DHT')
+		let DHTData = JSON.parse(savedData)
+		this.myNodeID = DHTData.myNodeID
+		this.makeNode = this._makeNode() //reset with myNodeID
+		this.makeNode(DHTData.myNodeID, this.port, this.host)
+		this.buckets = []
+		let self = this
+		DHTData.buckets.forEach( bucket => { self.buckets.push( new Bucket(bucket.range[0], bucket.range[1])) })
+		Object.keys(DHTData.addressBook).forEach( id => self.makeNode(id, DHTData.addressBook[id].port, DHTData.addressBook[id].host))
+
 	}
 
 	lookup(url) {
@@ -259,10 +289,6 @@ class DHT {
 		this.forceRefreshBuckets()
 
 		return ret
-
-	}
-
-	saveDHT() {
 
 	}
 
@@ -336,7 +362,7 @@ class DHT {
 					}
 
 				} catch (error) { 
-					//console.log(error)
+
 					if( error instanceof TimeoutError)
 						pQueue.push( { id: task.id , times : task.times+1} , xorDistance(nodeID)(task.id))
 
@@ -354,7 +380,6 @@ class DHT {
 
 	}
 
-	//////////
 	async getPeersIter(nodeID, ignorePeers) {
 
 		return new Promise( (resolve, reject) => {
@@ -441,178 +466,7 @@ class DHT {
 		})
 
 	}
-
- 	/*
-	async findNodeIter(nodeID)  {
-
-		return new Promise( (resolve, reject) => {
-
-			let [[node], nodes] = this.findNode(nodeID)
-
-			let allNodes = new NSet(nodes), queriedNodes = new NSet()
-			let kClosest = nodes, kClosestCount = 0
-			let workers = 0
-
-			var query = (node, i) => {
-
-				queriedNodes.add(node)
-				if(kClosestCount >= 8)
-					return
-
-				if(this.getNode(node).state == NODE_STATE.BAD) {
-					nextQuery(node)
-					return
-				}
-
-				this.getNode(node).findNode(nodeID).then( pair => {
-					let [[node], result] = pair
-					result = result.filter( id => this.getNode(id).state != NODE_STATE.BAD)
-					result = result.filter( id => id != this.myNodeID )
-					allNodes = allNodes.union(new NSet(result))
-					successTest(node)
-					nextQuery()
-
-				}).catch( (err) => { 
-
-					if( err instanceof TimeoutError && i++ < 3) { 
-						query(node, i)
-					} else 
-						//node is bad
-						nextQuery()
-				
-				})
-
-			}
-
-			var successTest = (n) => {
-
-				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
-				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
-					kClosestCount++
-				else 
-					kClosestCount = 0
-				
-				kClosest = closestSoFar
-				
-				if(LOG) {
-					console.log("myNodeID:", this.myNodeID, kClosestCount, workers)
-					console.log("kClosest:", kClosest )
-				}
-
-				if(kClosestCount >= 8 ) {
-					kClosestCount = 8
-					resolve([null, kClosest]) //called only once
-				}
-
-				//if(closestSoFar.findIndex( id => id == nodeID) != -1 ) {
-				if(n) {
-					kClosestCount = 8
-					resolve([nodeID, kClosest])
-				}
-
-			}
-
-			var nextQuery = (node) => {
-
-				if(kClosestCount >= 8 )
-					return
-
-				let nextNodes = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID))
-
-				workers--
-				if(LOG)
-					console.log('nextQuery', workers, nextNodes.length )
-				let k = Math.max(Math.min(8 - workers, nextNodes.length), 0)
-
-				nextNodes = nextNodes.slice(0, k)
-				workers += k
-
-				nextNodes.forEach(node => query(node, 0))
-
-			}
-
-			workers = allNodes.size
-			allNodes.forEach( node => query(node, 0) )
-
-		})
-			
-	}
-
-	async getPeersIter(nodeID) {
-
-		return new Promise( (resolve, reject) => {
-
-			let allPeers = []
-			let [peers, nodes] = this.getPeers(nodeID)
-
-			let allNodes = new NSet(nodes), queriedNodes = new NSet()
-			let kClosest = nodes, kClosestCount = 0, peerCount = 0
-
-			var query = (node) => {
-
-				queriedNodes.add(node)
-				if(kClosestCount >= 8)
-					return
-
-				this.getNode(node).getPeers(nodeID).then( result => {
-
-					let [peers, nodes] = result
-					allNodes = allNodes.union(new NSet(nodes))
-					querySuccess(peers, nodes)
-
-				}).catch( (err) => { 
-
-					queryFail(node)
-				
-				})
-
-			}
-
-			var successTest = (peers, nodes) => {
-
-				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
-				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
-					kClosestCount++
-				else 
-					kClosestCount = 0
-				
-				kClosest = closestSoFar
-				if(peers)
-					allPeers = allPeers.concat(peers)
-			
-				if(kClosestCount >= 8)
-					//exit when 50 peers ??
-					resolve([allPeers, kClosest]) //called only once
-
-			}
-
-			var querySuccess = (peers, nodes) => {
-
-				if(kClosestCount >= 8)
-					return
-
-				successTest(peers, nodes)
-
-				let closestUnqueried = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 8)
-				closestUnqueried.slice(0,1).forEach(node => query(node))
-
-			}
-
-			var queryFail = (node) => {
-
-				if(kClosestCount >= 8)
-					return
-
-				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
-
-			}
-
-			allNodes.forEach( node => query(node) )
-
-		})
-			
-	}*/
-
+ 	
 	getPeers(infoHash) {
 
 		let [node, nodes, hasMyNode] = this._getClosestNodes(infoHash)
@@ -745,115 +599,8 @@ class DHT {
 		}
 		
 	}
-	/*
-	async replaceNodesInDHT (nodeID, i) { // i limits recursion
-
-		let node = this.getNode(nodeID)
-		let bucket = this._findBucketFits(nodeID)
-
-		if(bucket.nodeIDs.every( id => this.getNode(id).good )  && bucket.isFull())
-			return
-
-		var finish = () => {
-
-			bucket.worker = 0
-			if(bucket.queue.length > 0) {
-
-				if(i > 100) {
-					bucket.queue = []
-					return
-				}
-
-				let nextNodeID = bucket.queue.shift()
-				//this.replaceNodesInDHT(nextNodeID, i)
-
-			}
-
-		}
-
-		if(bucket.worker > 0) {
-
-			if(bucket.everSeenSet.has(nodeID))
-				return
-
-			bucket.everSeenSet.add(nodeID)
-			bucket.queue.push(nodeID) //already unique
-			
-			let s = new NSet(bucket.queue) //remove duplicate
-			bucket.queue = Array.from(s)
-			
-			return
-
-		}
-
-		bucket.worker = 1
-		///////////////////////////////
-
-		if(bucket.nodeIDs.every( id => this.getNode(id).good ) || !bucket.isFull() 
-			|| bucket.has(this.myNodeID) || node.state == NODE_STATE.BAD || bucket.has(nodeID)) {
-				finish()
-				return
-		}
-
-		try {
-
-			let ms = await node.ping()
-
-		} catch( error ) {
-
-			if(error instanceof TimeoutError || error instanceof KRPCError) {
-				finish()
-				return
-			} else 
-				throw error
-	
-		} 
-
-		let quesNodeIDs = bucket.getBucketNodeIDs().filter( (id) => this.getNode(id).state != NODE_STATE.GOOD)
-		quesNodeIDs.sort( (id1, id2 ) => this.getNode(id1).lastRespReq - this.getNode(id2).lastRespReq )
-
-		let aQuesNodeID = quesNodeIDs.shift()
-
-		while( quesNodeIDs.length > 0 ) {
-
-			try {
-
-				let ms = await this.getNode(aQuesNodeID).ping()
-				
-			} catch (error) {
-
-				if(error instanceof TimeoutError || error instanceof KRPCError) {
-					bucket.remove(aQuesNodeID)
-
-					if(!bucket.has(nodeID) & !bucket.isFull()) //unncessary
-						bucket.insert(nodeID)
-
-					if(bucket.nodeIDs.every( id => this.getNode(id).state == NODE_STATE.GOOD ) && bucket.isFull()) {
-						bucket.worker = 0
-						bucket.queue = []
-						return
-					}
-					
-					finish() //just break
-					return  
-
-				} else 
-					throw error
-
-			}
-
-			aQuesNodeID = quesNodeIDs.shift()	
-
-		}
-
-		finish()
-
-	}
-	*/
-
 	_inDHT(id) {
 
-		this.foo = id
 		return this._findBucketFits(id).has(id)
 
 	}
@@ -865,6 +612,9 @@ class DHT {
 	}
 
 	_recvRequest(msg, rinfo) {
+
+		if(!this.myNodeID)
+			return
 
 		let request
 

@@ -37,10 +37,13 @@ activespieces
 peerID
 */
 
+// Peer (fileMetaData, listeners, checkID, [sock | addr] , )
 function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
 	Duplex.call(this, opts)
+
+	this.checkID = checkID
 
 	this.uninitialized = true
 	this.connecting = false
@@ -225,6 +228,12 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 	this.supportsDHT = supportsDHT
 	this.supportsExten = supportsExten
 	console.log("handshake")
+	//check peerID
+	if(!this.checkID(peerID)) {//bad ID
+		this.sock.end() //disconnect by closing socket
+		return
+	}
+
 	if(this.state != this.STATES.sent_hshake) //already sent handshake
 		this.handshake()
 

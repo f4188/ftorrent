@@ -125,10 +125,8 @@ class Swarm extends EventEmitter { //ip list
 
 		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 			
-			if(self.peers.some( peer => peer.host == sock.remoteAddress && peer.port == sock.remotePort ))
-				return
 			console.log("connecting", sock.remoteAddress, sock.remotePort)
-			let peer = new Peer(this.fileMetaData, self.listeners, sock) //peer owns socket
+			let peer = new Peer(this.fileMetaData, self.listeners, sock, self.checkPeerID) //peer owns socket
 
 			peer.on('connected', (peer) => {
 
@@ -142,16 +140,26 @@ class Swarm extends EventEmitter { //ip list
 
 	}
 
+	checkPeerID(peerID) { //maybe keep registry of peerIDs and addresses ?
+
+		if(peerID == this.peerID)
+			return false
+		if(this.peers.findIndex( peer => peer.peerID == peerID) != -1)
+			return false
+		return true 
+
+	}
+
 	connectPeer (addr) {
 		console.log("try connecting addr:", addr)
 		
 		
 		return new Promise((resolve, reject) => {
 
-			if(this.peers.some( peer => peer.host == addr.host && peer.port == addr.port) || addr.port == this.myPort)
-				reject('already connected or myself')
+			//if(addr.port == this.myPort)
+			//	reject('already connected or myself')
 
-			let peer = new Peer(this.fileMetaData, this.listeners, null, addr)
+			let peer = new Peer(this.fileMetaData, this.listeners, null, addr, this.checkPeerID)
 
 			let timeout = setTimeout(()=> {
 				reject("peer timeout")
