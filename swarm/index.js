@@ -99,12 +99,14 @@ class Swarm extends EventEmitter { //ip list
 
 			'disconnected' : ( peer ) => {
 
-				let stats = self.peerStats.get(peer.peerID)
-				stats.disconnects++
-				let pos = self.peers.findIndex( p => p.peerID == peer.peerID )
-				console.log('splicing', pos)
-				if(pos != -1)
-					self.peers.splice(pos, 1)
+				if(self.peerStats.get(peer.peerID)) {
+					let stats = self.peerStats.get(peer.peerID)
+					stats.disconnects++
+					let pos = self.peers.findIndex( p => p.peerID == peer.peerID )
+					console.log('splicing', pos)
+					if(pos != -1)
+						self.peers.splice(pos, 1)
+				}
 
 			},
 
@@ -126,7 +128,7 @@ class Swarm extends EventEmitter { //ip list
 		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 			
 			console.log("connecting", sock.remoteAddress, sock.remotePort)
-			let peer = new Peer(this.fileMetaData, self.listeners, sock, self.checkPeerID) //peer owns socket
+			let peer = new Peer(this.fileMetaData, self.listeners, sock, null, (self.checkPeerID).bind(this)) //peer owns socket
 
 			peer.on('connected', (peer) => {
 
@@ -141,10 +143,12 @@ class Swarm extends EventEmitter { //ip list
 	}
 
 	checkPeerID(peerID) { //maybe keep registry of peerIDs and addresses ?
-
-		if(peerID == this.peerID)
+		console.log('peerid', peerID)
+		if(!Buffer.isBuffer(peerID))
 			return false
-		if(this.peers.findIndex( peer => peer.peerID == peerID) != -1)
+		if(peerID.equals(this.fileMetaData.peerID))
+			return false
+		if(this.peers.findIndex( peer => peerID.equals(peer.peerID)) != -1)
 			return false
 		return true 
 
@@ -156,10 +160,7 @@ class Swarm extends EventEmitter { //ip list
 		
 		return new Promise((resolve, reject) => {
 
-			//if(addr.port == this.myPort)
-			//	reject('already connected or myself')
-
-			let peer = new Peer(this.fileMetaData, this.listeners, null, addr, this.checkPeerID)
+			let peer = new Peer(this.fileMetaData, this.listeners, null, addr, (this.checkPeerID).bind(this))
 
 			let timeout = setTimeout(()=> {
 				reject("peer timeout")
@@ -169,6 +170,11 @@ class Swarm extends EventEmitter { //ip list
 				clearTimeout(timeout)
 				console.log('resolve peer', peer.peerID)
 				resolve(peer) 
+			})
+
+			peer.on('reject id', (peer) => {
+				clearTimeout(timeout)
+				reject(new Error('rejected id')) 
 			})
 			
 		})
@@ -201,10 +207,11 @@ class Swarm extends EventEmitter { //ip list
 
 		peers = this.peers
 
-		let have = this.fileMetaData.pieces.has
-		let peerPieceList = peers.map( peer => Array.from(peer.pieces).map({ peer : peer, pieceIndex : peers.pieces } ) )
-		let dontHavePieceList = peerPieceList.filter( peerPieces => !have(peerPieces.pieces) )
-
+		let myPieces = this.fileMetaData.pieces
+		let peerPieceList = peers.map( peer =>  Array.from(peer.pieces).map( (piece) => { 
+			return { peer : peer, pieceIndex : peers.pieces } }) ).reduce( (list, peerList ) => {return list.concat(peerList) } , [] )
+		let dontHavePieceList = peerPieceList.filter( peerPieces => !myPieces.has(peerPieces.pieces) )
+		console.log("dont have", dontHavePieceList)
 		return byFreq(dontHavePieceList, 'pieceIndex').map( kv => kv.key )
 
 	}
@@ -534,6 +541,7 @@ Downloader.prototype.seedLoop = function() {
 
 Downloader.prototype.optUnchokeLoop = function() {
 
+		console.log('opt unchoke loop', Date.now())
 		//pick opts unchoke -- 3
 		//optUnchoke randomly but give weight to new peers
 		//this.optimisticUnchokePeers
@@ -564,6 +572,7 @@ Downloader.prototype.optUnchokeLoop = function() {
 
 Downloader.prototype.unchokeLoop = function() {
 
+	console.log('unchoke loop', Date.now())
 	let swarm = this.swarm
 
 	//choke any peer that chokes me and is not opt unchoke
@@ -614,18 +623,23 @@ Downloader.prototype.unchokeLoop = function() {
 //piece downloader - only called when pieces available
 Downloader.prototype.downloadPieces = function() {
 
+	console.log('downloadPiecelets')
 	peers = this.swarm.amUnchokedPeers.intersection(this.swarm.amInterestedPeers)
 	//get resend requests sent to peers that are now choked
-
+	console.log('making hist')
 	hist = this.swarm.piecesByFreq(peers) //assume peers are representative
+	console.log(hist)
 	//random from most freq and least freq
 	//update interested peers
-	while( this.activePieces < 10 && this.pieces.size < this.fileMetaData.numPieces) {
-		let randArrIdx = Math.floor(Math.pow(Math.random(), 3))
+	console.log('looping')
+	while( this.activePieces.size < 10 && this.pieces.size < this.fileMetaData.numPieces && hist.length > 0) {
+		let randArrIdx = Math.floor(Math.pow(Math.random(), 3) * hist.length)
+		console.log(randArrIdx)
 		let pIndex = hist[randArrIdx]
 		console.log(pIndex)
 		if(!this.pieces.has(pIndex)) 
-			this.activePieces.add(new this.ActivePiece(pIndex))
+			this.activePieces.set(pIndex, new this.ActivePiece(pIndex))
+		console.log(this.activePieces)
 	}
 
 	//download pieces from mutually unchoked peers in group (1) and amUnchoked peers in group (3)
@@ -635,6 +649,7 @@ Downloader.prototype.downloadPieces = function() {
 
 Downloader.prototype.downloadPiecelets = function() {
 
+	console.log('downloadPiecelets')
 	let swarm = this.swarm, requests = this.requests, peers = swarm.amUnchokedPeers.intersection(swarm.amInterestedPeers)
 	
 	this.requests.filter( request => request.peer.pChoked ).map( req => clearTimeout(req.timeout) )
@@ -746,11 +761,10 @@ Downloader.prototype.urlAnnounce = function() {
 		this.fileMetaData.announceUrlList.forEach( (announceUrl) => {
 
 			let u = new url.URL(announceUrl)		
-			console.log(u)
 			if(u.protocol == 'udp:') { //udp tracker		
 
 				let tracker = new UDPTracker(sock, u, infoHash, peerID)
-				console.log(tracker)
+				//console.log(tracker)
 				tracker.doAnnounce(this.stats, this.myPort).then(resp => this.addPeers(resp.peerList)).catch(err => console.log(err))
 			
 			} else if (u.protocol == 'http:') {
@@ -774,11 +788,9 @@ Downloader.prototype.waitUrlAnnounce = async function() {
 	return await Promise.race(this.fileMetaData.announceUrlList.map( async (announceUrl) => {
 
 		let u = new url.URL(announceUrl)		
-		console.log(u)
 		if(u.protocol == 'udp:') { //udp tracker		
 
 			let tracker = new UDPTracker(sock, u, infoHash, peerID)
-			console.log(tracker)
 			return await tracker.doAnnounce(this.stats, this.myPort)
 		
 		} else if (u.protocol == 'http:') {

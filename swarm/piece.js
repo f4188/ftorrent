@@ -12,16 +12,20 @@ An active piece object as here
 
 var readStreamFunc = async (path, start, end) => {
 
-	let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
-
 	return new Promise( (resolve, reject) => {
+
+		let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
+
+		pieceStream.on('error', (error) => reject(error))
 
 		pieceStream.on('readable', () => { 
 			let data = pieceStream.read(end - start)  
 			if(data)
 				resolve(data) 
 		})
-})}
+	})
+
+}
 
 var Pieces = (file) => class Piece {
 
@@ -70,7 +74,6 @@ var Pieces = (file) => class Piece {
 
 		try {
 
-			console.log(fileBounds)
 			chunks = await Promise.all( fileBounds.map( bound => {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
@@ -81,18 +84,21 @@ var Pieces = (file) => class Piece {
 			return Buffer.concat(chunks)
 
 		} catch (error) {
-			console.log(error)
-			return false
+			//console.log(error)
+			return null
 
-		}
-
-		
+		}	
 
 	}
 
 	async verify() {
 
 		let buf = await this.readPiece()
+
+		if(!buf) {
+			//console.log('no piece')
+			return this.good = false
+		}
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
 		console.log(hash, this.hash)

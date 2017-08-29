@@ -38,7 +38,7 @@ peerID
 */
 
 // Peer (fileMetaData, listeners, checkID, [sock | addr] , )
-function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
+function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 
 	opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
 	Duplex.call(this, opts)
@@ -120,18 +120,20 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 
 	this.sock.on('close', () => {
 
-		self.state = this.STATES.disconnected
+		self.state = self.STATES.disconnected
 		//clearout request queues
 		//self.emit('sock_closed')
-		self.emit('disconnected', this)
+		if(self.state == self.STATES.connected)
+			self.emit('disconnected', this)
 
 	})
 
 	this.sock.on('error', () => {
 
-		self.state = this.STATES.disconnected
+		self.state = self.STATES.disconnected
 		//self.emit('sock_closed')
-		self.emit('disconnected', this)
+		if(self.state == self.STATES.connected)
+			self.emit('disconnected', this)
 
 	})
 
@@ -231,6 +233,7 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 	//check peerID
 	if(!this.checkID(peerID)) {//bad ID
 		this.sock.end() //disconnect by closing socket
+		this.emit('reject id', this)
 		return
 	}
 
