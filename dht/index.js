@@ -218,7 +218,7 @@ class DHT {
 		let self = this
 		let buckets = this.buckets.map( bucket => { return { min : bucket.min, max : bucket.max, nodeIDs : bucket.nodeIDs } } ) 
 		let nodesInBuckets = buckets.map( bucket => bucket.nodeIDs).reduce( (list, nodeIDs) => list.concat(nodeIDs), [])
-		let nodeAddressBook = nodesInBuckets.reduce( ( soFar, id) => { soFar[id] = { port : self.nodes.get(id).port, host : self.nodes.get(id).host } return soFar} , {})
+		let nodeAddressBook = nodesInBuckets.reduce( ( soFar, id) => { soFar[id] = { port : self.nodes.get(id).port, host : self.nodes.get(id).host }; return soFar} , {})
 		let saveFile = fs.createWriteStream('./saved_DHT')
 		saveFile.write(JSON.stringify({buckets : buckets, addressBook : nodeAddressBook, myNodeID : this.myNodeID}))
 		saveFile.end()
