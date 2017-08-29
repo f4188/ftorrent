@@ -215,8 +215,8 @@ class DHT {
 
 	saveDHT() {
 
-		let buckets = this.buckets.map( bucket => { return { range : [bucket.min, bucket.max], nodeIDs : bucket.nodeIDs } } ) 
-		let nodesInBuckets = this.buckets.map( bucket => bucket.nodeIDs).reduce( (list, nodeIDs) => list.concat(nodeIDs), [])
+		let buckets = this.buckets.map( bucket => { return { min : bucket.min, max : bucket.max, nodeIDs : bucket.nodeIDs } } ) 
+		let nodesInBuckets = buckets.map( bucket => bucket.nodeIDs).reduce( (list, nodeIDs) => list.concat(nodeIDs), [])
 		let nodeAddressBook = nodesInBuckets.reduce( ( soFar, id) => soFar[id] = { port : this.nodes.get(id).port, host : this.nodes.get(id).host } , {})
 		let saveFile = fs.createWriteStream('./saved_DHT')
 		saveFile.write(JSON.stringify({buckets : buckets, addressBook : nodeAddressBook, myNodeID : this.myNodeID}))
@@ -233,8 +233,8 @@ class DHT {
 		this.makeNode(DHTData.myNodeID, this.port, this.host)
 		this.buckets = []
 		let self = this
-		DHTData.buckets.forEach( bucket => { self.buckets.push( new Bucket(bucket.range[0], bucket.range[1])) })
-		Object.keys(DHTData.addressBook).forEach( id => self.makeNode(id, DHTData.addressBook[id].port, DHTData.addressBook[id].host))
+		DHTData.buckets.forEach( bucket => { self.buckets.push( new Bucket(bucket.min, bucket.max)) })
+		DHTData.buckets.forEach(bucket => bucket.nodeIDs.forEach( id => self.makeNode(id, DHTData.addressBook[id].port, DHTData.addressBook[id].host)) )
 
 	}
 
@@ -571,7 +571,7 @@ class DHT {
 						try {
 
 							let ms = await map.get(aQuesNodeID).ping()
-							console.log("Pinged:", aQuesNodeID, "| rtt:", ms )
+							if(LOG) console.log("Pinged:", aQuesNodeID, "| rtt:", ms )
 							
 						} catch (error) {
 
