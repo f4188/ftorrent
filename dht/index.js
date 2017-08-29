@@ -1,6 +1,7 @@
 
 dgram = require('dgram')
 crypto = require('crypto')
+async = require('async')
 xor = require('buffer-xor')
 
 benDecode = require('bencode').decode
@@ -29,6 +30,8 @@ var xorCompare = (id) => (n1, n2) => {
 		return 0
 
 }
+
+var xorDistance = (id) => (nodeID) =>  parseInt(xor(new Buffer(nodeID, 'hex'), new Buffer(id, 'hex')), 16)
 
 var xorCompareIDStrings = xorCompare
 var xorCompareIDs = xorCompare
@@ -90,7 +93,6 @@ class DHT {
 		var _tokenUpdater = function tknUpdtr() {
 
 			self.oldToken = self.newToken
-			//self.newToken.value = crypto.randomBytes(8)
 			let hash = crypto.createHash('sha1')
 			self.newToken.value = hash.update(self.host.split('.').join("")).digest('hex') + crypto.randomBytes(4)
 			self.newToken.hosts = new Set()
@@ -100,7 +102,7 @@ class DHT {
 		_tokenUpdater()
 
 		this.tokenInterval = setInterval(_tokenUpdater, 5*60*1e3)
-		//(nodeID, port, host, myNodeID, sock)
+
 		var _makeNode = () => {
 
 			return (nodeID, port, host) => {
@@ -137,10 +139,6 @@ class DHT {
 
 		this.buckets.forEach( bucket => {
 
-			bucket.worker = 0
-			bucket.queue = []
-			bucket.everSeenSet = new NSet()
-
 			let rand = Math.floor(Math.random() * bucket.nodeIDs.length)
 			let node 
 
@@ -163,10 +161,6 @@ class DHT {
 	refreshBuckets() {
 
 		this.buckets.forEach( bucket => {
-
-			bucket.worker = 0
-			bucket.queue = []
-			bucket.everSeenSet = new NSet()
 
 			let lastChanged = Math.max(bucket.lastChanged, ...(bucket.nodeIDs.map( nodeID => this.getNode(nodeID).lastRespReq )))
 			
@@ -227,8 +221,9 @@ class DHT {
 
 	}
 
-	async bootstrap() {
-		
+	async bootstrap(log) {
+
+		LOG = log ? log : false
 		this.myNodeID = crypto.randomBytes(20).toString('hex')
 		this.makeNode(this.myNodeID ,this.port, this.host)
 
@@ -241,7 +236,6 @@ class DHT {
 		let nodes, node
 		let tries = 0
 
-		//while( tries++ < 5 && !nodes) {
 		while(!nodes) {
 
 			try {
@@ -262,6 +256,7 @@ class DHT {
 		let ret = await this.findNodeIter(this.myNodeID) //builds dht
 
 		this.refreshLoop = setInterval((this.refreshBuckets).bind(this), 15 * 60 * 1e3)
+		this.forceRefreshBuckets()
 
 		return ret
 
@@ -282,6 +277,172 @@ class DHT {
 
 	}
 
+	async findNodeIter(nodeID) {
+
+		return new Promise( (resolve, reject) => {
+
+			let [[node], nodes] = this.findNode(nodeID)
+
+			let allNodes = new NSet(nodes), queriedNodes = new NSet()
+			let kClosest = nodes, kClosestCount = 0
+			let pQueue
+			let map = this.nodes
+			let myNodeID = this.myNodeID
+
+			var buildQueries = (node) => {
+
+				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
+				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
+					kClosestCount++
+				else 
+					kClosestCount = 0
+				
+				kClosest = closestSoFar
+				
+				if(LOG) {
+					console.log("myNodeID:", myNodeID, kClosestCount)
+					console.log("kClosest:", kClosest )
+				}
+
+				if(kClosestCount >= 8)
+					return true
+
+				let nextNodes = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID))
+				nextNodes.forEach( id => queriedNodes.add(id) )
+				nextNodes.forEach(id => { pQueue.push( { id: id , times : 0 }, xorDistance(nodeID)(id) ) } )
+
+				return false
+
+			}
+
+			var query = async (task, callback) => {
+
+				if(map.get(task.id).state == NODE_STATE.BAD || task.times >= 3) {
+					callback()
+					return
+				}
+				
+				try {
+
+					let [[node], result] = await map.get(task.id).findNode(nodeID)
+					result = result.filter( id => map.get(id).state != NODE_STATE.BAD || id != myNodeID)
+					allNodes = allNodes.union(new NSet(result))
+
+					if(buildQueries(node)) {
+						resolve([node, kClosest]) //called only once
+						pQueue.kill()
+						callback()
+						return
+					}
+
+				} catch (error) { 
+					//console.log(error)
+					if( error instanceof TimeoutError)
+						pQueue.push( { id: task.id , times : task.times+1} , xorDistance(nodeID)(task.id))
+
+				}
+
+				callback()
+
+			}
+
+			pQueue = async.priorityQueue(query, 8)
+			allNodes.forEach( id => queriedNodes.add(id) )
+			allNodes.forEach( id => pQueue.push( { id: id, times : 0 } , xorDistance(nodeID)(id)) )
+
+		})
+
+	}
+
+	//////////
+	async getPeersIter(nodeID, ignorePeers) {
+
+		return new Promise( (resolve, reject) => {
+
+			let [peers, nodes] = this.getPeers(nodeID)
+
+			let allNodes = new NSet(nodes), queriedNodes = new NSet(), kClosest = nodes, kClosestCount = 0
+			let pQueue, map = this.nodes, myNodeID = this.myNodeID
+			let allPeers = peers ? peers : []
+
+			var buildQueries = (peers) => {
+
+				let closestSoFar = Array.from(allNodes).sort(xorCompareIDs(nodeID)).slice(0, 8)
+				if( (new NSet(kClosest)).intersection(new NSet(closestSoFar)).size == 8 )
+					kClosestCount++
+				else 
+					kClosestCount = 0
+				
+				kClosest = closestSoFar
+				
+				if(LOG) {
+					console.log("myNodeID:", myNodeID, kClosestCount)
+					console.log("kClosest:", kClosest )
+				}
+
+				if(peers) {
+
+					if(ignorePeers)
+						peers.forEach( peer => {
+							if(!ignorePeers.some( p => p.host == peer.host && p.port == peer.port)) 
+								allPeers.push(peer)
+						})
+					else 
+						allPeers = Array.from(new NSet(allPeers.concat(peers)))
+
+				}
+
+				if(kClosestCount >= 8 || allPeers.length > 50)
+					return true
+
+				let nextNodes = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID))
+				nextNodes.forEach( id => queriedNodes.add(id) )
+				nextNodes.forEach(id => { pQueue.push( { id: id , times : 0 }, xorDistance(nodeID)(id) ) } )
+
+				return false
+
+			}
+
+			var query = async (task, callback) => {
+
+				if(map.get(task.id).state == NODE_STATE.BAD || task.times >= 3) {
+					callback()
+					return
+				}
+				
+				try {
+
+					let [peers, result] = await map.get(task.id).getPeers(nodeID)
+					result = result.filter( id => map.get(id).state != NODE_STATE.BAD || id != myNodeID)
+					allNodes = allNodes.union(new NSet(result))
+
+					if(buildQueries(peers)) {
+						resolve([allPeers, kClosest]) //called only once
+						pQueue.kill()
+						callback()
+						return
+					}
+
+				} catch (error) { 
+
+					if( error instanceof TimeoutError)
+						pQueue.push( { id: task.id , times : task.times+1} , xorDistance(nodeID)(task.id))
+
+				}
+
+				callback()
+
+			}
+
+			pQueue = async.priorityQueue(query, 8)
+			allNodes.forEach( id => queriedNodes.add(id) )
+			allNodes.forEach( id => pQueue.push( { id: id, times : 0 } , xorDistance(nodeID)(id)) )
+
+		})
+
+	}
+
+ 	/*
 	async findNodeIter(nodeID)  {
 
 		return new Promise( (resolve, reject) => {
@@ -290,7 +451,6 @@ class DHT {
 
 			let allNodes = new NSet(nodes), queriedNodes = new NSet()
 			let kClosest = nodes, kClosestCount = 0
-			//let dead = 0
 			let workers = 0
 
 			var query = (node, i) => {
@@ -360,7 +520,8 @@ class DHT {
 				let nextNodes = Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID))
 
 				workers--
-				console.log('nextQuery', workers, nextNodes.length )
+				if(LOG)
+					console.log('nextQuery', workers, nextNodes.length )
 				let k = Math.max(Math.min(8 - workers, nextNodes.length), 0)
 
 				nextNodes = nextNodes.slice(0, k)
@@ -418,7 +579,6 @@ class DHT {
 				kClosest = closestSoFar
 				if(peers)
 					allPeers = allPeers.concat(peers)
-				//console.log(peers)
 			
 				if(kClosestCount >= 8)
 					//exit when 50 peers ??
@@ -444,8 +604,6 @@ class DHT {
 					return
 
 				Array.from(allNodes.difference(queriedNodes)).sort(xorCompareIDs(nodeID)).slice(0, 1).forEach(node => query(node))
-				//if no nodes found and no nodes left silent exit
-				//if 8 silent fails then reject()
 
 			}
 
@@ -453,7 +611,7 @@ class DHT {
 
 		})
 			
-	}
+	}*/
 
 	getPeers(infoHash) {
 
@@ -506,7 +664,11 @@ class DHT {
 		let node = this.getNode(nodeID)
 		let bucket = this._findBucketFits(nodeID)
 
-		if(!bucket.isFull()) { 
+		if( bucket.isFull() && bucket.nodeIDs.every( id => this.getNode(id).state == NODE_STATE.GOOD )) {
+
+			return
+
+		} else if(!bucket.isFull()) { 
 
 			bucket.insert(nodeID)
 
@@ -518,6 +680,7 @@ class DHT {
 			while(bucket.has(this.myNodeID) && bucket.isFull()) {
 
 				let [b1, b2] = bucket.split()
+
 				if(b1.has(this.myNodeID)) {
 					this.buckets.push(b2)
 					this.buckets.push(b1)
@@ -531,15 +694,59 @@ class DHT {
 
 			this.buckets.push(bucket)
 
-		} else { 
-			//bucket is full and does not have myNode
-				this.replaceNodesInDHT(nodeID, 0) //do no await - return on ping
+		} else {  //bucket doesn't have myNode and is full and some node isn't good
 
+			if(bucket.queue == null) {
+				
+				let map = this.nodes //closure only captures what is defined when function defined
+				bucket.queue = async.queue(async function(task, callback) {
+
+					let node = task.node, bucket = task.bucket
+					if( bucket.isFull() && bucket.nodeIDs.every( id => map.get(id).state == NODE_STATE.GOOD ) 
+						|| node.state == NODE_STATE.BAD) {
+						callback()
+						return
+					}
+
+					let quesNodeIDs = bucket.getBucketNodeIDs().filter( (id) => map.get(id).state != NODE_STATE.GOOD)
+					quesNodeIDs.sort( (id1, id2 ) => map.get(id1).lastRespReq - map.get(id2).lastRespReq )
+					let aQuesNodeID = quesNodeIDs.shift()
+
+					while( quesNodeIDs.length > 0 ) {
+
+						try {
+
+							let ms = await map.get(aQuesNodeID).ping()
+							console.log("Pinged:", aQuesNodeID, "| rtt:", ms )
+							
+						} catch (error) {
+
+							//if(error instanceof TimeoutError || error instanceof KRPCError || true) {
+							bucket.remove(aQuesNodeID)
+							bucket.insert(nodeID)
+							break
+
+						}
+
+						aQuesNodeID = quesNodeIDs.shift()	
+
+					}
+
+					callback()
+
+				}, 1) 
+				
+				bucket.queue.push( { node : node, bucket : bucket } )
+
+			} else {
+				
+				bucket.queue.push( { node : node, bucket : bucket } )
+			}
 		}
 		
 	}
-
-	async replaceNodesInDHT (nodeID, i) {
+	/*
+	async replaceNodesInDHT (nodeID, i) { // i limits recursion
 
 		let node = this.getNode(nodeID)
 		let bucket = this._findBucketFits(nodeID)
@@ -558,7 +765,7 @@ class DHT {
 				}
 
 				let nextNodeID = bucket.queue.shift()
-				this.replaceNodesInDHT(nextNodeID, i)
+				//this.replaceNodesInDHT(nextNodeID, i)
 
 			}
 
@@ -618,17 +825,17 @@ class DHT {
 				if(error instanceof TimeoutError || error instanceof KRPCError) {
 					bucket.remove(aQuesNodeID)
 
-					if(!bucket.has(nodeID) & !bucket.isFull())
+					if(!bucket.has(nodeID) & !bucket.isFull()) //unncessary
 						bucket.insert(nodeID)
 
-					if(bucket.nodeIDs.every( id => this.getNode(id).good ) && bucket.isFull()) {
+					if(bucket.nodeIDs.every( id => this.getNode(id).state == NODE_STATE.GOOD ) && bucket.isFull()) {
 						bucket.worker = 0
 						bucket.queue = []
 						return
 					}
 					
-					finish()
-					return 
+					finish() //just break
+					return  
 
 				} else 
 					throw error
@@ -642,7 +849,7 @@ class DHT {
 		finish()
 
 	}
-
+	*/
 
 	_inDHT(id) {
 
@@ -674,7 +881,6 @@ class DHT {
 		let response
 				
 		if(request.y == 'q') {
-			//this.req = request
 
 			let queryNodeID = request.a.id.toString('hex')
 
@@ -772,8 +978,9 @@ class Bucket {
 		this.nodeIDs = []
 		this.lastInsertTime = null
 		this.worker = 0
-		this.queue = []
-		this.everSeenSet = new NSet()
+		this.queue = null// //.async.queue(, 8)
+		//this.queue = []
+		//this.everSeenSet = new NSet()
 
 	}
 
@@ -790,7 +997,7 @@ class Bucket {
 
 	}
 
-	contains(nodeID) { //only nodeID
+	contains(nodeID) {
 
 		return this.nodeIDs.some((bucketNodeID) => bucketNodeID == nodeID)
 
@@ -836,7 +1043,7 @@ class Bucket {
 
 	}
 
-	split() {  //splits at 
+	split() { 
 
 		let b1 = new Bucket(this.min, this.min + (this.max - this.min)/2)
 		let b2 = new Bucket(this.min + (this.max - this.min)/2, this.max)
@@ -932,7 +1139,7 @@ class Node {
 
 	get state() {
 
-		if(this.numNoResp > 4) 
+		if(this.numNoResp >= 3) 
 			return NODE_STATE.BAD
 
 		if(this.good) 
@@ -1002,7 +1209,6 @@ class Node {
 		} 
 	}
 
-	//returns list of nodes - used to populate dht
 	async findNode(targetNodeID) {
 
 		let transactID = crypto.randomBytes(2)
@@ -1014,7 +1220,11 @@ class Node {
 
 			response = await this._sendRequest(request)
 			this.numNoResp = 0
-			let nodes = this.parseNodeContactInfos(response.r.nodes) //returns list not pair
+			let nodes
+
+			if(response.r && response.r.nodes)
+				nodes = this.parseNodeContactInfos(response.r.nodes) //returns list not pair
+
 			if(this.nodeID == targetNodeID)
 				return [[targetnode], nodes]
 			else
@@ -1041,11 +1251,10 @@ class Node {
 			
 			response = await this._sendRequest(request)
 			this.numNoResp = 0
-			//console.log("response",response)
 			this.token = response.r.token
 			let peers, nodes
 		
-			if(response.r.nodes)
+			if(response.r && response.r.nodes)
 				nodes = this.parseNodeContactInfos(response.r.nodes)
 			if(response.r.values)
 				peers = this.parsePeerContactInfos(response.r.values, response.r.id)
@@ -1063,7 +1272,6 @@ class Node {
 
 	}
 
-	//used to announce
 	async announcePeer(infoHash, port) {
 
 		let transactID = crypto.randomBytes(2)
@@ -1085,9 +1293,7 @@ class Node {
 			let timeout = setTimeout( ()=> {
 
 				self.sock.removeListener('message', listener)
-				//throw new TimeoutError()
 				reject(new TimeoutError("Timeout: " + self.default_timeout + " (ms)"))
-				//throw new TimeoutError("Timeout: " + self.default_timeout + " (ms)")
 
 			} , this.default_timeout)
 
@@ -1100,9 +1306,7 @@ class Node {
 					response = benDecode(msg)
 
 				} catch (error) {
-
 					return
-
 				}
 
  				if(response.t && response.t.equals(request.t)) { //buffers
@@ -1121,8 +1325,7 @@ class Node {
 							reject(new KRPCError(response.e[0] + ": "+ response.e[1]))
 						else 
 							reject(new KRPCError("???"))
-						//throw new new KRPCError(response.e[0] + ": "+ response.e[1])
-						//maybe set bad
+
 					} else 
 						reject(new KRPCError("??"))
 

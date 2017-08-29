@@ -18,18 +18,6 @@ const NUM_OUTSTANDING_REQS = 200
 const NUM_ACTIVE_PIECES = 12
 const NUM_CONNECTIONS = 50
 
-getUDPSocket = function(port) {
-
-	let sock = dgram.createSocket('udp4').bind(port)
-
-	return new Promise ( (resolve, reject) => {
-		
-		sock.on('listening', () => { resolve(sock) } )
-
-	})
-
-}
-
 var byFreq = (arr, prop) => {
 
 	let freqs = arr.reduce( (freqs, elem) => {
@@ -52,6 +40,18 @@ var byFreq = (arr, prop) => {
 	freqArray.sort( (kv1, kv2) => kv1.freq - kv2.freq ) //sort by smallest
 
 	return freqArray //remove freq
+
+}
+
+getUDPSocket = function(port) { //run tests
+
+	let sock = dgram.createSocket('udp4').bind(port)
+
+	return new Promise ( (resolve, reject) => {
+		
+		sock.on('listening', () => { resolve(sock) } )
+
+	})
 
 }
 
@@ -690,6 +690,17 @@ Downloader.prototype.downloadPiecelets = function() {
 
 Downloader.prototype.pruneConn = function() {
 
+	//disconnect peers that are seeding if seeding
+	//disconnect peers that refuse requests
+	//disconnect peers that never unchoke even when interested (in me)
+
+	//get connections under limit by randomly disconnecting slow peers or infrequent or short time unchokers (1)
+	//peer leeching but mutually uninterested
+
+	//average total bandwidth available
+	// Z peeri * upload speed < average total bandwidth
+	//randomly disconnect one at a time from(1) and monitor download speed - stop when download speed decreases
+
 }
 
 Downloader.prototype.addPeers = function(peers) {
@@ -697,6 +708,13 @@ Downloader.prototype.addPeers = function(peers) {
 	//apply filters
 	if(!peers)
 		return
+
+
+	//if my address discard
+	//if already connected discard
+	//keep registry of nodes - discard ip if already in registry
+	//random connect new peers ? 
+
 
 	this.swarm.addPeers(peers.map( (tuple) => { return { host : tuple[0], port : tuple[1] } } ))
 

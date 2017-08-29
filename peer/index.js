@@ -106,7 +106,6 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 		this.sock.connect(addr.port, addr.host)
 
 		this.sock.on('connect', () => {	
-			//console.log('handshake')
 			self.handshake()
 			self.state = self.STATES.sent_hshake
 
@@ -152,9 +151,6 @@ function Peer(fileMetaData, listeners, sock, addr) { //, file, init) {
 	this.idle = this.pRequest == null && !this.parser.recievingPiece
 
 	this.sock.pipe(this.parser, opts).pipe(this).pipe(this.sock)
-
-	//this.sock.on('data', (chunk) => {  })
-	//this.on('data', (chunk) => {})
 
 	this.sock.resume()
 
@@ -542,7 +538,6 @@ class BitTorrentMsgParser extends Transform {
 
 	constructor(file) {
 
-		//reader reads objects, writer writes buffers
 		let opts = { 'objectMode': true, 'writableObjectMode' : true, 'highWaterMark' : 16384 * 2 }
 
 		super(opts)
