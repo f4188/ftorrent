@@ -113,11 +113,11 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	constructor(index) {
 
 		super(index)		
-
+		console.log('constructing')
 		this.pieceletLength = 2 ** 14
 		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
 		this.piecelets = new Map() 
-		this.left = index * this.pieceLength 
+		this.left = 0// index * this.pieceLength 
 		this.right = this.left + this.pieceLength
 		this.makeRequests()
 
@@ -125,18 +125,18 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	* nextPiecelet() {
 
-			let left = this.left, self = this
+		let left = this.left, self = this
 
-			while ( left < this.right ) {
-				
-				let length = (this.right - left) / this.pieceletLength > 1 ? this.pieceletLength : (this.right - left) 
-				let request = { index : this.index, begin : left, length : length}
-				request.putBack = () => { self.requests.push(request) }
-				yield request
-				left += this.pieceletLength
-			}
+		while ( left < this.right ) {
 
-			return false
+			let length = (this.right - left) / this.pieceletLength > 1 ? this.pieceletLength : (this.right - left) 
+			let request = { index : this.index, begin : left, length : length}
+			request.putBack = () => { self.requests.push(request) }
+			yield request
+			left += this.pieceletLength
+		}
+
+		return false
 
 	}
 
@@ -145,8 +145,8 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.requests = []
 		var gen = this.nextPiecelet()
 		var next = gen.next()
-		while(next) {
-			this.requests.push(next)
+		while(!next.done) {
+			this.requests.push(next.value)
 			next = gen.next()
 		}
 
@@ -154,8 +154,9 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	add(index, start, piecelet) {
 
-		let left = this.index * this.pieceletLength + start
-		let right = left = pieceletLength
+		//let left = this.index * piecelet.length + start
+		let left = start
+		let right = left + piecelet.length
 		this.piecelets.set(left+","+right, piecelet)
 		
 	}
@@ -176,7 +177,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		do {
 
 			left = newLeft
-			newLeft = Math.max(left, ...Array.from(this.piecelets).filter( k => k.split(',')[0] <= left).map( k => k.split(',')[1]) )
+			newLeft = Math.max(left, ...Array.from(this.piecelets.keys()).filter( k => k.split(',')[0] <= left).map( k => k.split(',')[1]) )
 
 		} while( left < this.right  && newLeft > left) 
 	
@@ -189,15 +190,19 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		if(!this.isComplete) return 
 
 		let left = this.left
-		let buf = Buffer.alloc(0, this.pieceLength)
+		let buf = Buffer.alloc(this.pieceLength)
 
 		do {
 
-			let lefts = Array.from(this.piecelets).filter( k => k.split(',')[0] <= left)
-			let maxRight = Math.max(lefts.map( k => k.split(',')[1])  )
+			let lefts = Array.from(this.piecelets.keys()).filter( k => Number(k.split(',')[0]) <= left)
+			let maxRight = Math.max( ...lefts.map( k =>  Number(k.split(',')[1]) ) )
+			//let maxRight = lefts.reduce( ( maxR, left) => {
+
+			//} , 0)
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
 			let piecelet = this.piecelets.get(interval)
-			piecelet.copy(buf, Number(interval.split(',')[0]), 0, this.piecelet.length)
+			console.log("interval:",interval)
+			piecelet.copy(buf, Number(interval.split(',')[0]), 0, piecelet.length)
 			left = maxRight
 
 		} while( left < this.right ) 
@@ -221,7 +226,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	writePiece(buf) {
 
 		let metaData = this.fileMetaData
-		let start = this.index * this.file.pieceLength
+		let start = this.index * this.pieceLength
 		let end = start + this.pieceLength
 
 		let fileBounds = [ [0, 0, metaData.fileLengthList[0]] ]

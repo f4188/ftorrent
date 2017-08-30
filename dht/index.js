@@ -189,7 +189,7 @@ class DHT {
 					node = bucket.nodeIDs[rand]
 				}
 
-				this.findNodeIter(node).catch( err => console.log("Refresh:", err))	
+				this.findNodeIter(node).then( x=> { }).catch( err => console.log("Refresh:", err))	 //dump nodes not in DHT
 			}
 
 		})
@@ -223,6 +223,7 @@ class DHT {
 		saveFile.write(JSON.stringify({buckets : buckets, addressBook : nodeAddressBook, myNodeID : this.myNodeID}))
 		saveFile.end()
 
+
 	}
 
 	async loadDHT() {
@@ -236,6 +237,10 @@ class DHT {
 		let self = this
 		DHTData.buckets.forEach( bucket => { self.buckets.push( new Bucket(bucket.min, bucket.max)) })
 		DHTData.buckets.forEach(bucket => bucket.nodeIDs.forEach( id => self.makeNode(id, DHTData.addressBook[id].port, DHTData.addressBook[id].host)) )
+
+		this.forceRefreshBuckets()
+		this.refreshLoop = setInterval((this.refreshBuckets).bind(this), 15 * 60 * 1e3)
+
 
 	}
 
@@ -637,6 +642,7 @@ class DHT {
 
 			let node = this.getNode(makeNode(queryNodeID, rinfo.port, rinfo.address)) //if id in dht returns existing node
 			node.resetQueryTimer()
+			console.log(request)
 
 			switch(request.q.toString()) {
 				case 'ping' :

@@ -56,7 +56,6 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 	this.pChoked = true; //i'm choked
 	this.choked = true //peer is choked
 	this.optUnchoked = false //separate boolean
-	//this.choke = !this.optUnchoke || this.normalChoke
 	this.pInterested = false;
 	this.interested = false
 
@@ -69,24 +68,15 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 	
 	this.peerID = null// = fileMetaData.peerID
 	this.myPeerID = null
-	//statistics 
-	//restart on reconnect?
-	//don't need rates here
-	this.downloadRate = 0
-	this.uploadRate = 0
 
 	this.uploadBytes = 0
 	this.uploadTime = 0
-
 	this.downloadBytes = 0
 	this.downloadTime = 0
 
 	this.sendPieceStart = null
-
-	//this.timeConnected = 0
 	this.disconnects = 0
 
-	this.file = fileMetaData
 	this.fileMetaData = fileMetaData
 
 	let self = this
@@ -120,20 +110,20 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 
 	this.sock.on('close', () => {
 
-		self.state = self.STATES.disconnected
 		//clearout request queues
 		//self.emit('sock_closed')
 		if(self.state == self.STATES.connected)
 			self.emit('disconnected', this)
+		self.state = self.STATES.disconnected
 
 	})
 
 	this.sock.on('error', () => {
 
-		self.state = self.STATES.disconnected
 		//self.emit('sock_closed')
 		if(self.state == self.STATES.connected)
 			self.emit('disconnected', this)
+		self.state = self.STATES.disconnected
 
 	})
 
@@ -150,13 +140,10 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 	this.pRequestList = [] //serialize requests here so can cancel latter
 	this.pRequest = null
 
-	var opts = {'end' : false}
-
 	this.parser = new BitTorrentMsgParser(this.fileMetaData)
-	this.idle = this.pRequest == null && !this.parser.recievingPiece
 
+	var opts = {'end' : false}
 	this.sock.pipe(this.parser, opts).pipe(this).pipe(this.sock)
-
 	this.sock.resume()
 
 }
@@ -198,8 +185,6 @@ Peer.prototype.piece = function(index, begin, piece) {
 	
 	p.end(this.makeMsg(PIECE_MSG_TYPE, index, begin, piece))
 
-	//need to know when done
-
 }
 
 Peer.prototype.finishRequest = function() {
@@ -226,25 +211,27 @@ Peer.prototype.pKeepAlive = function () {
 
 Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 
-	this.peerID = peerID
+	this.peerID = peerID.toString('hex')
 	this.supportsDHT = supportsDHT
 	this.supportsExten = supportsExten
-	console.log("handshake")
-	//check peerID
-	if(!this.checkID(peerID)) {//bad ID
+
+	if(!this.checkID(peerID.toString('hex'))) {//bad ID
+		console.log('reject handshake', peerID.toString('hex'))
 		this.sock.end() //disconnect by closing socket
 		this.emit('reject id', this)
 		return
 	}
-
+	console.log('accepting handshake', peerID.toString('hex'), this.port, this.host)
 	if(this.state != this.STATES.sent_hshake) //already sent handshake
 		this.handshake()
 
 	this.state = this.STATES.connected
 	this.emit('connected', this)
 
-	this.bitfield()
 	this.exHandShake()
+	this.bitfield()
+
+	this.emit('new_pieces')
 
 	return true
 
@@ -266,7 +253,6 @@ Peer.prototype.pUnchoke = function() {
 
 Peer.prototype._pInterested = function() {
 
-	console.log("interested")
 	this.pInterested = true
 	this.emit('peer_interested')
 
@@ -279,12 +265,16 @@ Peer.prototype.pUninterested = function() {
 
 }
 
+//call on have or bitField message - also when downloader makes new activePiece
 Peer.prototype.updateInterested = function() {
 
 	let activePieces = this.fileMetaData.activePieces
+	if(!this.interested && this.pieces.intersection(new NSet(activePieces.keys())).size > 0) {
+		this.sendInterested()
+	}
 
-	if(!this.interested && this.pieces.intersection(new NSet(activePieces.keys())).size > 0)
-		this.interested()
+	if(this.state == this.STATES.connected)
+		this.emit('new_pieces')
 
 }
 
@@ -305,7 +295,7 @@ Peer.prototype.pBitfield = function (pieceList) {
 
 Peer.prototype.isSeeder = function() {
 
-	return this.pieces.size == this.fileMetaData.numPieces
+	return this.pieces.size >= this.fileMetaData.numPieces
 
 }
 
@@ -329,12 +319,12 @@ Peer.prototype.fulfillRequest = function() { //expects pRequest to be null and p
 }
 
 Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, begin, length, piece
-
+	console.log("piece", piece)
 	if(this.pChoked) return //discard piece
 	this.uploadBytes += piece.length
 	this.uploadTime += uploadTime
 
-	this.emit('peer_piece', this, index, begin, length, piece)
+	this.emit('peer_piece', this, index, begin, piece, uploadTime)
 
 }
 
@@ -359,17 +349,17 @@ Peer.prototype.pPort = function (payload) {
 
 Peer.prototype.handshake = function() {
 
+	console.log('handshake', this.port, this.host)
 	let nt = new Buffer(1)
 	nt.writeUInt8(0x13)
 
 	let bitTorrent = Buffer.from('BitTorrent protocol')
-	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.file.infoHash, this.fileMetaData.peerID])
+	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.fileMetaData.infoHash, Buffer.from(this.fileMetaData.peerID,'hex')])
 	
 
 	//only check extension supported by this client
 	buf.writeUInt8(0x10, 25) 
 	buf.writeUInt8(0x01, 27)
-	console.log(buf)
 	this.push(buf)
 
 	this.exHandShake()
@@ -418,6 +408,7 @@ Peer.prototype.exHandShake = function() {
 
 }
 
+//make sep factory object
 Peer.prototype.makeMsg = function(type, ...args) { // ...args = [int1, int2, buffer1, int3, ... ]
 
 	var bufferFrom = (num) => { let buf = Buffer.alloc(4); buf.writeUInt32BE(num); return buf}
@@ -461,7 +452,7 @@ Peer.prototype.unchoke = function() {
 
 }
 
-Peer.prototype.interested = function() {
+Peer.prototype.sendInterested = function() {
 
 	this.interested = true
 	this.push(this.makeMsg(INTERESTED_MSG_TYPE))
@@ -485,7 +476,7 @@ Peer.prototype.have = function(pieceIndex) {
 
 Peer.prototype.bitfield = function () {
 
-	let pieces = Array.from(this.file.pieces).map(pairs => pairs[0]).sort( (a, b) => a - b  )
+	let pieces = Array.from(this.fileMetaData.pieces).map(pairs => pairs[0]).sort( (a, b) => a - b  )
 	let bitFieldLength = Math.ceil(this.fileMetaData.numPieces / 8)
 
 	let bitField = Buffer.alloc(bitFieldLength)
@@ -504,7 +495,7 @@ Peer.prototype.bitfield = function () {
 
 Peer.prototype.request = function(index, begin, length) {
 
-	this.push(makeMsg(REQUEST_MSG_TYPE, index, begin, length))
+	this.push(this.makeMsg(REQUEST_MSG_TYPE, index, begin, length))
 
 }
 
@@ -635,7 +626,7 @@ class BitTorrentMsgParser extends Transform {
 				parsedMsg.args = this.parseRequestMsg(msg)
 				break
 			case PIECE_MSG_TYPE :  
-				parsedMsg.args = this.parsePieceMsg(msg, upLoadTime)
+				parsedMsg.args = this.parsePieceMsg(msg, uploadTime)
 				break
 			case CANCEL_MSG_TYPE : 
 				parsedMsg.args = this.parseCancelMsg(msg)
@@ -653,13 +644,6 @@ class BitTorrentMsgParser extends Transform {
 				//ignore unrecognized messages
 				
 		}
-
-		//if( parsedMsg.args == undefined ) {
-			//something bad
-		//}
-
-		//if(parsedMsg.payload != undefined  && Object.keys(parseMsg.payload).length == 0) 
-		//	return
 		
 		//parsedMsg = { type : _ , exType : _, args : { _ , _ , data = _ }}
 		this.push(parsedMsg)  // push to peer
@@ -678,8 +662,6 @@ class BitTorrentMsgParser extends Transform {
 
 		msg.forEach(function(byte, i, v) {
 
-			///let j = 0
-			//let bits = byte.readUInt8(0)
 			for(let j = 0 ; j < 8 ; j++) {
 				if(byte & 0x1)
 					bitField.push(i * 8 + j)
@@ -697,9 +679,6 @@ class BitTorrentMsgParser extends Transform {
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
 		let length = msg.readUInt32BE(8)
-
-		//if(index > this.file.numPieces && begin < this.file.pieceLength 
-		//	&& length < this.file.pieceLength) 
 		return { index : index, begin : begin, length : length }
 	}
 
@@ -708,21 +687,15 @@ class BitTorrentMsgParser extends Transform {
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
 		let length = msg.readUInt32BE(8)
-
-		//if(index < this.file.numPieces && begin < this.file.pieceLength
-		//	&& length < this.file.pieceLength) 
 		return { index : index, begin : begin, length : length }
 
 	}
 
-	parsePieceMsg(msg, upLoadTime) {
+	parsePieceMsg(msg, uploadTime) {
 
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
-		
-		//if(index < this.file.numPieces && begin < this.file.pieceLength) {
 		return { index : index, begin : begin, piece : msg.slice(8), uploadTime : uploadTime }
-		//}
 
 	}	
 
