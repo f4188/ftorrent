@@ -374,6 +374,9 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 	this.swarm.listeners['peer_piece'] = (peer, index, begin, piecelet, uploadTime) => { 
 
+		if(!self.activePieces.has(index))
+			return
+
 		let piece = self.activePieces.get(index)
 		piece.add(index, begin, piecelet)
 
@@ -381,7 +384,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 		if(piece.isComplete && piece.assemble()) { //copy to disk		
 
-			self.activePieces.delete(piece)
+			self.activePieces.delete(index)
 			self.pieces.set(index, new self.Piece(index))
 			self.swarm.havePiece(index)
 							
@@ -391,7 +394,6 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 				return		
 			} 
 
-			//self.pieces.set(index, new self.Piece(index))
 			self.emit('recieved_piece') //call downloadPiece before downloadPiecelet
 
 
@@ -679,10 +681,8 @@ Downloader.prototype.downloadPieces = function() {
 
 Downloader.prototype.downloadPiecelets = function() {
 
-	console.log('downloadPiecelets')
 	let swarm = this.swarm, requests = this.requests, peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
-	console.log(peers)
-
+	console.log('downloadPiecelets', peers)
 	this.requests.filter( request => request.peer.pChoked ).map( req => clearTimeout(req.timeout) )
 	this.requests.filter( request => request.peer.pChoked || request.timeout._called ).forEach( req => req.putBack(req) )
 	this.requests = this.requests.filter( request => !request.peer.pChoked && !request.timeout_called )
@@ -706,27 +706,29 @@ Downloader.prototype.downloadPiecelets = function() {
 		let iters = 0
 		
 		let pieces = this.swarm.peers.get(peer).pieces.intersection(new NSet(this.activePieces.keys())) //swarm.pieces(peers)
+		let pieceList = Array.from(pieces)
 
 		do { //randomly select piece, get piecelet or if no piecelet then repeat
 
-			randomIndex = Math.floor(Math.random() * pieces.size) //maybe favour pieces that idle peers have ??
+			randomIndex = Math.floor(Math.random() * pieceList.length) //maybe favour pieces that idle peers have ??
 			piece = Array.from(pieces)[randomIndex]
 
 			pieceletReq = this.activePieces.get(piece).randPieceletReq()
-			iters++
+			if(!pieceletReq)
+				pieceList.splice(randomIndex, 1)
 
-		} while (!pieceletReq && iters < this.activePieces.size) //fix infinite loop
+		} while (!pieceletReq && pieceList.length > 0) //fix infinite loop
 
-		if(iters < this.activePieces.size) //no more piecelets left
+		if(pieceletReq) //no more piecelets left
 			reqToPeer( peer, pieceletReq )
 
-		return iters < this.activePieces.size
+		return pieceletReq
 
 	}).bind(this)
 
 	//always interested in these peers
-	while(this.requests.length < peers.size * 4 && peers.size > 0 && i++ < 300) {
-		console.log('pieceletloop')
+	while(this.requests.length < peers.size * 4 && peers.size > 0 && this.activePieces.size > 0 ) {//&& i++ < 1000) {
+		console.log('pieceletloop', this.requests.length, this.activePieces.size)
 
 		//randomly select peer - more heavily weight idle peers
 		//let freqArr = byFreq(this.requests, 'peer')
@@ -737,10 +739,10 @@ Downloader.prototype.downloadPiecelets = function() {
 		let randomPeer = Array.from(peers)[Math.floor(rand * rand * peers.size)]	
 
 
-		if( randReqToPeer(randomPeer) ) //no more piecelets
-			peers = peers.difference(new NSet(randomPeer)) //just delete or remove
+		if( !randReqToPeer(randomPeer) ) //no more piecelets
+			peers = peers.delete(randomPeer) //just delete or remove
 
-		peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
+		//peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
 
 	}
 
