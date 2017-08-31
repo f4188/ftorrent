@@ -45,11 +45,10 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	this.canConnect = true 
 	this.canConnectTimeout
 
-	//const URL = require('url').URL
-	//var host = url//new URL(url)
-
 	this.client = sock
 	this.address = net.isIP(url.hostname) ?  url.hostname : this.address = null
+
+	//tracker address
 	this.host = url.hostname
 	this.port = parseInt(url.port)
 
@@ -122,10 +121,10 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 
 }
 
-UDPTracker.prototype.doAnnounce = async function(stats, myIP) {
+UDPTracker.prototype.doAnnounce = async function(stats, myPort) {
 
 	this.stats = stats
-	this.myIP = myIP
+	this.myPort = myPort
 
 	if(!this.canConnect) throw Error('to soon to connect')
 	this.stats = stats
@@ -203,7 +202,7 @@ UDPTracker.prototype._buildAnnounceReq = function() {
 	buf.writeUInt32BE(ip, 84);
 	buf.writeUInt32BE(key, 88) //?
 	buf.writeInt32BE(numWant, 92)
-	buf.writeUInt16BE(this.myIP , 96)
+	buf.writeUInt16BE(this.myPort , 96)
 	return buf
 
 }

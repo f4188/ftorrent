@@ -588,18 +588,15 @@ Downloader.prototype.start = async function() {
 
 Downloader.prototype.leech = function() {
 
-	console.log('leech')
 	//clearInterval(this.sloop)
 	//this.announceLoop()
 	this.annLoop = setInterval((this.announceLoop).bind(this), 300 * 1e3)
 
-	console.log('setup unchoker functions')
 	this.on('new_peers', (this.optUnchokeLoop).bind(this))
 	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), 30 * 1e3)
 	this.on('new_peers', (this.unchokeLoop).bind(this))
 	this.uLoop = setInterval((this.unchokeLoop).bind(this), 10 * 1e3)
 
-	console.log('attach listeners')
 	this.on('recieved_piece', (this.downloadPieces).bind(this))
 	this.on('recieved_piecelet', (this.downloadPiecelets).bind(this))
 	this.on('request_timeout', (this.downloadPieces).bind(this))
@@ -885,6 +882,9 @@ Downloader.prototype.pruneConn = function() {
 }
 
 Downloader.prototype.addPeers = function(peers) {
+
+	if(this.seeding)
+		return
 
 	peers = peers.map( (tuple) => { return { host : tuple[0], port : tuple[1] } } )
 	//apply filters

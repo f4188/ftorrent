@@ -91,7 +91,7 @@ var Pieces = (file) => class Piece {
 			return Buffer.concat(chunks)
 
 		} catch (error) {
-	//		console.log(error)
+
 			return null
 
 		}	
@@ -102,13 +102,10 @@ var Pieces = (file) => class Piece {
 
 		let buf = await this.readPiece()
 
-		if(!buf) {
-			//console.log('no piece')
+		if(!buf) 
 			return this.good = false
-		}
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
-//		console.log(hash)
 
 		return this.good = hash == this.hash
 
@@ -210,7 +207,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			//} , 0)
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
 			let piecelet = this.piecelets.get(interval)
-			console.log("interval:",interval)
 
 			piecelet.copy(buf, Number(interval.split(',')[0]), 0, piecelet.length)
 
@@ -219,12 +215,9 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		} while( left < this.right ) 
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
-		if( hash == this.hash) { 
-			console.log('write piece', buf)
+
+		if( hash == this.hash)
 			return this.writePiece(buf)
-			//return true
-		
-		} 
 
 		//startover
 		this.makeRequests()
