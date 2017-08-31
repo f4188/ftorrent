@@ -201,7 +201,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			//} , 0)
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
 			let piecelet = this.piecelets.get(interval)
-			console.log("interval:",interval)
+			//console.log("interval:",interval)
 			piecelet.copy(buf, Number(interval.split(',')[0]), 0, piecelet.length)
 			left = maxRight
 
@@ -211,39 +211,53 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		let hashValue = hash.update(buf).digest('hex')
 		if( hashValue == this.hash) { 
 
-			this.writePiece(buf)
-			return true
+			return this.writePiece(buf)
+			//return true
 		
 		} 
 
 		//startover
 		this.makeRequests()
+		this.piecelets = new Map()
 		return false
 
 
 	}
 
 	writePiece(buf) {
-
+		console.log('writing piece')
 		let metaData = this.fileMetaData
-		let start = this.index * this.pieceLength
+		let start = this.index * this.normalPieceLength
 		let end = start + this.pieceLength
 
-		let fileBounds = [ [0, 0, metaData.fileLengthList[0]] ]
+		let leftBound = 0, fileBounds = []
 
-		for(var i = 1 ; i < metaData.fileLengthList.length - 1; i++) {
+		for(var i = 0 ; i < metaData.fileLengthList.length; i++) {
 
-			let bound = fileBounds[i-1][2]
-			fileBounds.push( [i, bound,  bound + metaData.fileLengthList[i] ] )
+			let rightBound = leftBound + metaData.fileLengthList[i]
+			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
+				fileBounds.push([i, leftBound, rightBound])
+			leftBound = rightBound
 
 		}
 
-		fileBounds.filter( (bound) => bound[0] < start && bound[1] > start || bound[0] < end && bound[1] > end ).forEach( (bound, i, v) => {
+		try {
 
-			let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
-			createWriteStream( metaData.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd} ).end(buf.slice(bound[1] % metaData.pieceLength, bound[2] % metaData.pieceLength ))
+			fileBounds.forEach( bound => {
 
-		})
+				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
+				let chunklet = buf.slice( chunkletEnd - chunkletStart + (bound[1] - start) )
+				fs.createWriteStream( metaData.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd} ).end(chunklet)
+				//return readStreamFunc(metaData.pathList[bound[0]], chunkletStart, chunkletEnd)
+
+			})
+
+		} catch (error) {
+			console.log(error)
+			return false
+		}
+
+		return true
 
 	}	
 

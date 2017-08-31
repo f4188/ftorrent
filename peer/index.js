@@ -45,10 +45,10 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 
 	this.checkID = checkID
 
-	this.uninitialized = true
-	this.connecting = false
-	this.connected = false
-	this.disconnected = false
+	//this.uninitialized = true
+	//this.connecting = false
+	//this.connected = false
+	//this.disconnected = false
 
 	this.STATES = { uninitialized : 0, sent_hshake : 1, connected : 2, disconnected : 3 }
 	this.state = this.STATES.uninitialized
@@ -265,16 +265,29 @@ Peer.prototype.pUninterested = function() {
 
 }
 
-//call on have or bitField message - also when downloader makes new activePiece
+Peer.prototype.aInterested = function() {
+
+	let myPieces = this.fileMetaData.pieces
+	return (this.pieces.difference(new NSet(myPieces.keys())).size > 0)
+
+}
+
+//call on have or bitField message - also when downloader makes new activePiece - and piece downloaded
 Peer.prototype.updateInterested = function() {
 
 	let activePieces = this.fileMetaData.activePieces
-	if(!this.interested && this.pieces.intersection(new NSet(activePieces.keys())).size > 0) {
-		this.sendInterested()
+	let myPieces = this.fileMetaData.pieces
+	if(this.pieces.intersection(new NSet(activePieces.keys())).size > 0) {
+		if(!this.interested)
+			this.sendInterested()
+	} else {
+		if(this.interested)
+			this.unInterested()
 	}
 
-	if(this.state == this.STATES.connected)
+	if(this.aInterested()) {
 		this.emit('new_pieces')
+	}
 
 }
 
@@ -282,6 +295,7 @@ Peer.prototype.pHave = function(pieceIndex) {
 
 	this.pieces.add(pieceIndex)
 	this.updateInterested()
+	//emit new piece
 	
 }
 
@@ -290,6 +304,7 @@ Peer.prototype.pBitfield = function (pieceList) {
 	let pieces = this.pieces
 	pieceList.forEach( (pieceIndex) => { pieces.add(pieceIndex) } )
 	this.updateInterested()
+	//emit new piece
 	
 }
 
@@ -319,7 +334,7 @@ Peer.prototype.fulfillRequest = function() { //expects pRequest to be null and p
 }
 
 Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, begin, length, piece
-	console.log("piece", piece)
+	//console.log("piece", index, begin)
 	if(this.pChoked) return //discard piece
 	this.uploadBytes += piece.length
 	this.uploadTime += uploadTime
@@ -657,7 +672,7 @@ class BitTorrentMsgParser extends Transform {
 	}
 
 	parseBitFieldMsg(msg) {
-
+		console.log(JSON.stringify(msg.toString('hex')))
 		let bitField = []
 
 		msg.forEach(function(byte, i, v) {
@@ -669,6 +684,7 @@ class BitTorrentMsgParser extends Transform {
 			}
 
 		})
+		console.log("bitfield:", bitField)
 
 		return { bitField : bitField }
 
