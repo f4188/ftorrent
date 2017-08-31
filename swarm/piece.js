@@ -9,20 +9,18 @@ An active piece object as here
 
 
 */
-
-var readStreamFunc = async (path, start, end) => {
+// 59506688 to 59572224
+var readStreamFunc = (path, start, end) => {
 
 	return new Promise( (resolve, reject) => {
 
+		let buf = new Buffer(0)
 		let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
 
 		pieceStream.on('error', (error) => reject(error))
+		pieceStream.on('data', (data) => {buf = Buffer.concat([buf, data])})
+		pieceStream.on('end', ()=>{ resolve(buf) })
 
-		pieceStream.on('readable', () => { 
-			let data = pieceStream.read(end - start)  
-			if(data)
-				resolve(data) 
-		})
 	})
 
 }
@@ -31,17 +29,15 @@ var Pieces = (file) => class Piece {
 
 	constructor(index) {
 
-		this.fileMetaData = file
 		this.hash = file.pieceHashes[index]
 
-		this.path = file //path to file on disk
+		this.path = file.path //path to file on disk
 		this.pathList = file.pathList
-		
 		this.fileLengthList = file.fileLengthList
 
 		this.index = index 
 		this.isLast = index == file.numPieces - 1
-		this.normalPieceLength =  file.pieceLength
+		this.normalPieceLength = file.pieceLength
 		this.pieceLength = this.isLast ? file.fileLength % file.pieceLength : file.pieceLength
 
 	}
@@ -58,14 +54,13 @@ var Pieces = (file) => class Piece {
 
 		let start = this.index * this.normalPieceLength + begin, end = start + length
 
-		let metaData = this.fileMetaData
 		let chunks
 
 		let leftBound = 0, fileBounds = []
 
-		for(var i = 0 ; i < metaData.fileLengthList.length; i++) {
+		for(var i = 0 ; i <this.fileLengthList.length; i++) {
 
-			let rightBound = leftBound + metaData.fileLengthList[i]
+			let rightBound = leftBound + this.fileLengthList[i]
 			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
 				fileBounds.push([i, leftBound, rightBound])
 			leftBound = rightBound
@@ -74,17 +69,29 @@ var Pieces = (file) => class Piece {
 
 		try {
 
-			chunks = await Promise.all( fileBounds.map( bound => {
+			chunks = await Promise.all( fileBounds.map( async bound => {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
-				return readStreamFunc(metaData.pathList[bound[0]], chunkletStart, chunkletEnd)
+			//	console.log('index:', this.index)
+			//	console.log('reading from', chunkletStart, "to", chunkletEnd)
+
+				try {
+
+					return await readStreamFunc(this.pathList[bound[0]], chunkletStart, chunkletEnd)
+
+				} catch (error) {
+
+				//	console.log(error)
+					return null
+
+				}
 
 			}))
 
 			return Buffer.concat(chunks)
 
 		} catch (error) {
-			//console.log(error)
+	//		console.log(error)
 			return null
 
 		}	
@@ -101,7 +108,8 @@ var Pieces = (file) => class Piece {
 		}
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
-		console.log(hash, this.hash)
+//		console.log(hash)
+
 		return this.good = hash == this.hash
 
 	}
@@ -112,13 +120,15 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	constructor(index) {
 
-		super(index)		
-		console.log('constructing')
+		super(index)
+
 		this.pieceletLength = 2 ** 14
 		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
 		this.piecelets = new Map() 
-		this.left = 0// index * this.pieceLength 
+
+		this.left = 0
 		this.right = this.left + this.pieceLength
+
 		this.makeRequests()
 
 	}
@@ -154,7 +164,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	add(index, start, piecelet) {
 
-		//let left = this.index * piecelet.length + start
 		let left = start
 		let right = left + piecelet.length
 		this.piecelets.set(left+","+right, piecelet)
@@ -201,16 +210,17 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			//} , 0)
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
 			let piecelet = this.piecelets.get(interval)
-			//console.log("interval:",interval)
+			console.log("interval:",interval)
+
 			piecelet.copy(buf, Number(interval.split(',')[0]), 0, piecelet.length)
+
 			left = maxRight
 
 		} while( left < this.right ) 
 
-		let hash = crypto.createHash('sha1')
-		let hashValue = hash.update(buf).digest('hex')
-		if( hashValue == this.hash) { 
-
+		let hash = crypto.createHash('sha1').update(buf).digest('hex')
+		if( hash == this.hash) { 
+			console.log('write piece', buf)
 			return this.writePiece(buf)
 			//return true
 		
@@ -225,16 +235,15 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	}
 
 	writePiece(buf) {
-		console.log('writing piece')
-		let metaData = this.fileMetaData
+
 		let start = this.index * this.normalPieceLength
 		let end = start + this.pieceLength
 
 		let leftBound = 0, fileBounds = []
 
-		for(var i = 0 ; i < metaData.fileLengthList.length; i++) {
+		for(var i = 0 ; i < this.fileLengthList.length; i++) {
 
-			let rightBound = leftBound + metaData.fileLengthList[i]
+			let rightBound = leftBound + this.fileLengthList[i]
 			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
 				fileBounds.push([i, leftBound, rightBound])
 			leftBound = rightBound
@@ -246,14 +255,14 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			fileBounds.forEach( bound => {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
-				let chunklet = buf.slice( chunkletEnd - chunkletStart + (bound[1] - start) )
-				fs.createWriteStream( metaData.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd} ).end(chunklet)
-				//return readStreamFunc(metaData.pathList[bound[0]], chunkletStart, chunkletEnd)
+				let chunklet = buf.slice( (chunkletStart - start) , chunkletEnd - start)
+				//console.log('writing', chunklet)
+				fs.createWriteStream( this.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd - 1} ).end(chunklet)
 
 			})
 
 		} catch (error) {
-			console.log(error)
+			//console.log(error)
 			return false
 		}
 

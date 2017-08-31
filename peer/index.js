@@ -23,32 +23,16 @@ const EXTENDED_MSG_TYPE = 20
 
 const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
-//const PEEREX_MSG_TYPE = 1
-//const METADATAEX_MSG_TYPE = 2
-
-//var PPEEREX_MSG_TYPE
-//var PMETADATAEX_MSG_TYPE 
-
-/* from fileMetaData
-numPieces
-pieces map
-infoSize
-activespieces
-peerID
-*/
-
-// Peer (fileMetaData, listeners, checkID, [sock | addr] , )
-function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
+function Peer(fileMetaData, download, listeners, sock, addr, checkID) { //, file, init) {
 
 	opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
 	Duplex.call(this, opts)
 
 	this.checkID = checkID
+	this.log = fs.createWriteStream('./peerlog.log')
 
-	//this.uninitialized = true
-	//this.connecting = false
-	//this.connected = false
-	//this.disconnected = false
+	this.fileMetaData = fileMetaData
+	this.download = download
 
 	this.STATES = { uninitialized : 0, sent_hshake : 1, connected : 2, disconnected : 3 }
 	this.state = this.STATES.uninitialized
@@ -64,7 +48,7 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 	this.supportedExtensions = {}
 	this.recvExtensions = {}
 	
-	this.pieces = new NSet() //pHave and pBitfield
+	this.pieces = new NSet() //_pHave and _pBitfield
 	
 	this.peerID = null// = fileMetaData.peerID
 	this.myPeerID = null
@@ -75,9 +59,7 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 	this.downloadTime = 0
 
 	this.sendPieceStart = null
-	this.disconnects = 0
-
-	this.fileMetaData = fileMetaData
+	this.disconnects = 0 /////////////
 
 	let self = this
 
@@ -127,13 +109,13 @@ function Peer(fileMetaData, listeners, sock, addr, checkID) { //, file, init) {
 
 	})
 
-	this.msgHandlers = { 'handshake': (this.pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
-		[CHOKE_MSG_TYPE] : (this._pChoke).bind(this), [UNCHOKE_MSG_TYPE] : (this.pUnchoke).bind(this), 
-		[INTERESTED_MSG_TYPE] : (this._pInterested).bind(this), [UNINTERESTED_MSG_TYPE] : (this.pUninterested).bind(this), 
-		[HAVE_MSG_TYPE] : (this.pHave).bind(this), [BITFIELD_MSG_TYPE] : (this.pBitfield).bind(this), 
-		[REQUEST_MSG_TYPE] : (this._pRequest).bind(this), [PIECE_MSG_TYPE] : (this.pPiece).bind(this), 
-		[CANCEL_MSG_TYPE] : (this.pCancel).bind(this), [DHT_PORT_MSG_TYPE] : (this.pPort).bind(this), 
-		[EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : (this.pExHandShake).bind(this) }
+	this.msgHandlers = { 'handshake': (this._pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
+		[CHOKE_MSG_TYPE] : (this._pChoke).bind(this), [UNCHOKE_MSG_TYPE] : (this._pUnchoke).bind(this), 
+		[INTERESTED_MSG_TYPE] : (this._pInterested).bind(this), [UNINTERESTED_MSG_TYPE] : (this._pUninterested).bind(this), 
+		[HAVE_MSG_TYPE] : (this._pHave).bind(this), [BITFIELD_MSG_TYPE] : (this._pBitfield).bind(this), 
+		[REQUEST_MSG_TYPE] : (this._pRequest).bind(this), [PIECE_MSG_TYPE] : (this._pPiece).bind(this), 
+		[CANCEL_MSG_TYPE] : (this._pCancel).bind(this), [DHT_PORT_MSG_TYPE] : (this._pPort).bind(this), 
+		[EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : (this._pExHandShake).bind(this) }
 	}
 
 
@@ -164,7 +146,7 @@ Peer.prototype.piece = function(index, begin, piece) {
 	p.on('end', (()=> { 
 
 		//p.unpipe(this.sock)
-		this.finishRequest() 
+		this._finishRequest() 
 		this.downloadTime += (Date.now() - this.sendPieceStart)
 		this.emit('piece_sent', this)
 
@@ -173,27 +155,27 @@ Peer.prototype.piece = function(index, begin, piece) {
 	p.on('error', (()=> { 
 
 		//p.unpipe(this.sock)
-		this.finishRequest() 
+		this._finishRequest() 
 
 	}).bind(this))
 
 	p.on('unpipe', (()=> { 
 
-		this.finishRequest() 
+		this._finishRequest() 
 
 	}).bind(this))
 	
-	p.end(this.makeMsg(PIECE_MSG_TYPE, index, begin, piece))
+	p.end(this._makeMsg(PIECE_MSG_TYPE, index, begin, piece))
 
 }
 
-Peer.prototype.finishRequest = function() {
+Peer.prototype._finishRequest = function() {
 
 	this.resume()
 	this.pRequest = null
 
 	if(this.pRequestList.length > 0)
-		this.fulfillRequest()
+		this._fulfillRequest()
 
 }
 
@@ -209,7 +191,7 @@ Peer.prototype.pKeepAlive = function () {
 
 }
 
-Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
+Peer.prototype._pHandshake = function (peerID, supportsDHT, supportsExten) {
 
 	this.peerID = peerID.toString('hex')
 	this.supportsDHT = supportsDHT
@@ -226,12 +208,13 @@ Peer.prototype.pHandshake = function (peerID, supportsDHT, supportsExten) {
 		this.handshake()
 
 	this.state = this.STATES.connected
+	
 	this.emit('connected', this)
+	//this.emit('new_pieces', this)
 
-	this.exHandShake()
+	//this.exHandShake()
 	this.bitfield()
 
-	this.emit('new_pieces')
 
 	return true
 
@@ -244,7 +227,7 @@ Peer.prototype._pChoke = function () {
 
 }
 
-Peer.prototype.pUnchoke = function() {
+Peer.prototype._pUnchoke = function() {
 
 	this.pChoked = false
 	this.emit('peer_unchoked')
@@ -258,7 +241,7 @@ Peer.prototype._pInterested = function() {
 
 }
 
-Peer.prototype.pUninterested = function() {
+Peer.prototype._pUninterested = function() {
 
 	this.pInterested = false
 	this.emit('peer_uninterested')
@@ -266,45 +249,45 @@ Peer.prototype.pUninterested = function() {
 }
 
 Peer.prototype.aInterested = function() {
-
-	let myPieces = this.fileMetaData.pieces
-	return (this.pieces.difference(new NSet(myPieces.keys())).size > 0)
+ 
+	return (this.pieces.difference(new NSet(this.download.pieces.keys())).size > 0)
 
 }
 
 //call on have or bitField message - also when downloader makes new activePiece - and piece downloaded
 Peer.prototype.updateInterested = function() {
-
-	let activePieces = this.fileMetaData.activePieces
-	let myPieces = this.fileMetaData.pieces
-	if(this.pieces.intersection(new NSet(activePieces.keys())).size > 0) {
-		if(!this.interested)
-			this.sendInterested()
-	} else {
-		if(this.interested)
-			this.unInterested()
-	}
-
-	if(this.aInterested()) {
-		this.emit('new_pieces')
-	}
+	
+	if(this.aInterested() && !this.interested) 
+		this.sendInterested()
+	else if(!this.aInterested() && this.interested)
+		this.unInterested()
 
 }
 
-Peer.prototype.pHave = function(pieceIndex) { 
+Peer.prototype._newPieces = function(pieceIndex) {
+
+	this.updateInterested()
+
+	if(this.aInterested())
+		this.emit('new_pieces', this)
+
+}
+
+Peer.prototype._pHave = function(pieceIndex) { 
 
 	this.pieces.add(pieceIndex)
-	this.updateInterested()
-	//emit new piece
+	//this.log.write("peer pieces " + Array.from(this.pieces.keys()))
+
+	this._newPieces()
 	
 }
 
-Peer.prototype.pBitfield = function (pieceList) { 
+Peer.prototype._pBitfield = function (pieceList) { 
 
 	let pieces = this.pieces
+	this.log.write("peer pieces " + Array.from(pieces.keys()))
 	pieceList.forEach( (pieceIndex) => { pieces.add(pieceIndex) } )
-	this.updateInterested()
-	//emit new piece
+	this._newPieces()
 	
 }
 
@@ -318,11 +301,11 @@ Peer.prototype._pRequest = function(index, begin, length) {
 
 	if(this.choked) return
 	this.pRequestList.push( { index : index, begin: begin, length : length })
-	this.fulfillRequest()
+	this._fulfillRequest()
 
 }
 
-Peer.prototype.fulfillRequest = function() { //expects pRequest to be null and pRequestList to have requests - called by _pRequest and finishRequest
+Peer.prototype._fulfillRequest = function() { //expects pRequest to be null and pRequestList to have requests - called by _pRequest and _finishRequest
 
 	if(this.pRequest != null) 
 		return
@@ -333,8 +316,8 @@ Peer.prototype.fulfillRequest = function() { //expects pRequest to be null and p
 
 }
 
-Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, begin, length, piece
-	//console.log("piece", index, begin)
+Peer.prototype._pPiece = function (index, begin, piece, uploadTime) { //index, begin, length, piece
+
 	if(this.pChoked) return //discard piece
 	this.uploadBytes += piece.length
 	this.uploadTime += uploadTime
@@ -343,7 +326,7 @@ Peer.prototype.pPiece = function (index, begin, piece, uploadTime) { //index, be
 
 }
 
-Peer.prototype.pCancel = function (index, begin, length) {
+Peer.prototype._pCancel = function (index, begin, length) {
 
 	if(this.pRequest != null && this.pRequest.index == index && this.pRequest.begin == begin && this.pRequest.length == length)
 		this.pRequest.p.unpipe(this.sock)
@@ -355,7 +338,7 @@ Peer.prototype.pCancel = function (index, begin, length) {
 	
 }
 
-Peer.prototype.pPort = function (payload) {
+Peer.prototype._pPort = function (payload) {
 
 	this.nodePort = payload
 	this.emit('DHT_port', payload, this.host)
@@ -364,20 +347,19 @@ Peer.prototype.pPort = function (payload) {
 
 Peer.prototype.handshake = function() {
 
-	console.log('handshake', this.port, this.host)
+	console.log(this.download.peerID, 'handshake', this.port, this.host)
 	let nt = new Buffer(1)
 	nt.writeUInt8(0x13)
 
 	let bitTorrent = Buffer.from('BitTorrent protocol')
-	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.fileMetaData.infoHash, Buffer.from(this.fileMetaData.peerID,'hex')])
+	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.fileMetaData.infoHash, Buffer.from(this.download.peerID,'hex')])
 	
-
 	//only check extension supported by this client
-	buf.writeUInt8(0x10, 25) 
-	buf.writeUInt8(0x01, 27)
+	//buf.writeUInt8(0x10, 25) 
+	//buf.writeUInt8(0x01, 27)
 	this.push(buf)
 
-	this.exHandShake()
+	//this.exHandShake()
 
 }
 
@@ -391,11 +373,11 @@ Peer.prototype.port = function(port) {
 
 	let bufPort = Buffer.alloc(2)
 	bufPort.writeUInt16BE(port)
-	this.push(makeMsg(DHT_PORT_MSG_TYPE, bufPort))
+	this.push(_makeMsg(DHT_PORT_MSG_TYPE, bufPort))
 
 }
 
-Peer.prototype.pExHandShake = function(payload) {
+Peer.prototype._pExHandShake = function(payload) {
 
 	let {m, p, v, yourip, ipv6, ipv4, reqq, metadata_size} = payload
 	
@@ -419,13 +401,14 @@ Peer.prototype.exHandShake = function() {
 	let exHandShake = { m : this.recvExtensions, p : this.sock.address().port, v : this.version, yourip : yourip, reqq : 16 } 
 
 	let payload = benEncode(exHandShake)
-	this.push(this.makeMsg([EXTENDED_MSG_TYPE, EXTENDED_HANDSHAKE_MSG_TYPE], payload))
+	this.push(this._makeMsg([EXTENDED_MSG_TYPE, EXTENDED_HANDSHAKE_MSG_TYPE], payload))
 
 }
 
 //make sep factory object
-Peer.prototype.makeMsg = function(type, ...args) { // ...args = [int1, int2, buffer1, int3, ... ]
+Peer.prototype._makeMsg = function(type, ...args) { // ...args = [int1, int2, buffer1, int3, ... ]
 
+	this.log.write( Date.now() + " | making msg " + type + " " + args.slice(0, 3) + "\n")
 	var bufferFrom = (num) => { let buf = Buffer.alloc(4); buf.writeUInt32BE(num); return buf}
 
 	let buf = Buffer.alloc(6)
@@ -456,42 +439,42 @@ Peer.prototype.makeMsg = function(type, ...args) { // ...args = [int1, int2, buf
 Peer.prototype.choke = function() {
 
 	this.choked = true
-	this.push(this.makeMsg(CHOKE_MSG_TYPE))
+	this.push(this._makeMsg(CHOKE_MSG_TYPE))
 
 }
 
 Peer.prototype.unchoke = function() {
 
 	this.choked = false
-	this.push(this.makeMsg(UNCHOKE_MSG_TYPE))
+	this.push(this._makeMsg(UNCHOKE_MSG_TYPE))
 
 }
 
 Peer.prototype.sendInterested = function() {
 
 	this.interested = true
-	this.push(this.makeMsg(INTERESTED_MSG_TYPE))
+	this.push(this._makeMsg(INTERESTED_MSG_TYPE))
 
 }
 
 Peer.prototype.unInterested = function() {
 
 	this.interested = false
-	this.push(this.makeMsg(UNINTERESTED_MSG_TYPE))
+	this.push(this._makeMsg(UNINTERESTED_MSG_TYPE))
 
 }
 
 Peer.prototype.have = function(pieceIndex) {
 
-	this.push(this.makeMsg(HAVE_MSG_TYPE, pieceIndex))
-	if(this.interested && this.pieces.difference(this.fileMetaData.pieces).size == 0) 
+	this.push(this._makeMsg(HAVE_MSG_TYPE, pieceIndex))
+	if(this.interested && this.pieces.difference(this.download.pieces).size == 0) 
 		this.unInterested()
 
 }
 
 Peer.prototype.bitfield = function () {
 
-	let pieces = Array.from(this.fileMetaData.pieces).map(pairs => pairs[0]).sort( (a, b) => a - b  )
+	let pieces = Array.from(this.download.pieces).map(pairs => pairs[0]).sort( (a, b) => a - b  )
 	let bitFieldLength = Math.ceil(this.fileMetaData.numPieces / 8)
 
 	let bitField = Buffer.alloc(bitFieldLength)
@@ -503,20 +486,20 @@ Peer.prototype.bitfield = function () {
 		bitField.writeUInt8(byte, Math.floor(pieceIndex / 8))
 
 	})
-	console.log(bitField)
-	this.push(this.makeMsg(BITFIELD_MSG_TYPE, bitField))
+
+	this.push(this._makeMsg(BITFIELD_MSG_TYPE, bitField))
 
 }
 
 Peer.prototype.request = function(index, begin, length) {
 
-	this.push(this.makeMsg(REQUEST_MSG_TYPE, index, begin, length))
+	this.push(this._makeMsg(REQUEST_MSG_TYPE, index, begin, length))
 
 }
 
 Peer.prototype.cancel = function (index, begin, length) {
 
-	this.push(this.makeMsg(CANCEL_MSG_TYPE, index, begin, length))
+	this.push(this._makeMsg(CANCEL_MSG_TYPE, index, begin, length))
 
 }
 
@@ -672,19 +655,19 @@ class BitTorrentMsgParser extends Transform {
 	}
 
 	parseBitFieldMsg(msg) {
-		console.log(JSON.stringify(msg.toString('hex')))
+
 		let bitField = []
+		let self = this
 
 		msg.forEach(function(byte, i, v) {
 
 			for(let j = 0 ; j < 8 ; j++) {
-				if(byte & 0x1)
+				if(byte & 0x80 && (i * 8 + j) < self.file.numPieces)
 					bitField.push(i * 8 + j)
-				byte >>= 1
+				byte <<= 1
 			}
 
 		})
-		console.log("bitfield:", bitField)
 
 		return { bitField : bitField }
 
