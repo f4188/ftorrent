@@ -90,16 +90,13 @@ class Swarm extends EventEmitter {
 
 			'disconnected' : ( peer ) => {
 
-				if(self.peers.has(peer.peerID)) {
-						console.log("deleting", peer.peerID)
-						self.peers.delete(peer.peerID, peer)
-				}
+				console.log("deleting", peer.peerID)
 
-				if(self.peerStats.get(peer.peerID)) {
-					let stats = self.peerStats.get(peer.peerID)
-					stats.disconnects++
-						
-				}
+				if(self.peers.has(peer.peerID))
+					self.peers.delete(peer.peerID, peer)
+
+				if(self.peerStats.has(peer.peerID))
+					self.peerStats.get(peer.peerID).disconnects++
 
 				self.emit('peer_disconnected')
 
@@ -129,11 +126,11 @@ class Swarm extends EventEmitter {
 
 			},
  
-			'peer_piece' : (peer, index, begin, piecelet, uploadTime) => { 
+			'peer_piece' : (peer, index, begin, piecelet) => { 
 			
 				let stats = self.peerStats.get(peer.peerID)
-				stats.uploadTime = this.uploadTime
-				stats.uploadBytes = this.uploadBytes
+				stats.uploadTime = peer.uploadTime
+				stats.uploadBytes = peer.uploadBytes
 
 			},
 
@@ -156,8 +153,10 @@ class Swarm extends EventEmitter {
 		createServer(sockOpts, ( sock ) => {
 			
 			console.log("server connection", sock.remoteAddress, sock.remotePort)
-			let peer = new Peer(this.fileMetaData, this.download, self.listeners, sock, null, (self.checkPeerID).bind(this)) //peer owns socket
-
+			//let peer = new Peer(this.fileMetaData, this.download, self.listeners, sock, null, (self.checkPeerID).bind(this)) //peer owns socket
+			//let peer new Peer(sock, null)
+			let peer = this.makePeer(sock)
+			
 			peer.on('connected', (peer) => {
 
 				self.emit('new_peer', peer)
@@ -173,6 +172,31 @@ class Swarm extends EventEmitter {
 
 	}
 
+	makePeer(sock, addr) {
+
+		if(!sock) {
+
+			let sockOpts = { 'allowHalfOpen' : false }
+			sock = new net.Socket(sockOpts)
+			sock.connect(addr.port, addr.host)		
+
+		}
+
+		let peer = new Peer(this.fileMetaData, this.download, sock, (this.checkPeerID).bind(this))
+		this.addListeners(peer, this.listeners)
+
+		return peer.handshake()
+
+	}
+
+	addListeners(peer, listeners) {
+
+		for( var event in listeners)
+			peer.on(event, listeners[event])
+		
+	}
+
+
 	checkPeerID(peerID) { //maybe keep registry of peerIDs and addresses ?
 
 		if(peerID == (this.fileMetaData.peerID))
@@ -187,8 +211,9 @@ class Swarm extends EventEmitter {
 		
 		return new Promise((resolve, reject) => {
 
-			let peer = new Peer(this.fileMetaData, this.download, this.listeners, null, addr, (this.checkPeerID).bind(this))
-
+			//let peer = makePeer()
+			let peer = this.makePeer(null, addr)
+		
 			let timeout = setTimeout(()=> {
 				reject("peer timeout")
 			}, this.defaultTimeout)
@@ -426,7 +451,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 	}	
 
-	this.swarm.listeners['peer_piece'] = (peer, index, begin, piecelet, uploadTime) => { 
+	this.swarm.listeners['peer_piece'] = (peer, index, begin, piecelet) => { 
 
 		if(!self.activePieces.has(index))
 			return
@@ -561,7 +586,7 @@ Downloader.prototype.start = async function() {
 		this.seed()
 	else
 		this.leech()
-	return peerList
+//	return peerList
 
 }
 
@@ -898,7 +923,7 @@ Downloader.prototype.announce = async function() {
 
 	let sock = await getUDPSocket() 
 	
-	var _annnounce = function (announceUrl, callback) {
+	var _annnounce = (async function (announceUrl, callback) {
 
 		let resp, tracker
 		let u = new url.URL(announceUrl)
@@ -911,12 +936,14 @@ Downloader.prototype.announce = async function() {
 		
 		try {
 
-			let { numLeechers, numSeeders, interval, peerList } = await tracker.doAnnounce(this.myPort)
+			resp = await tracker.doAnnounce(this.myPort)
+			let { numLeechers, numSeeders, interval, peerList } = resp
+
 			this.addPeers(peerList || [])
 			console.log("Tracker:", announceUrl)
 			console.log("leechers:", numLeechers)
 			console.log('seeders:', numSeeders)
-			console.log('peers returned:' peerList.length)
+			console.log('peers returned:', peerList)
 
 		} catch(error) {
 
@@ -928,9 +955,9 @@ Downloader.prototype.announce = async function() {
 
 		}
 
-	}.bind(this)
+	}).bind(this)
 
-	async.each( announceUrlList, _annnounce, function (err, callback) {})
+	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err, callback) {})
 
 }
 

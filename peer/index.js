@@ -23,10 +23,10 @@ const EXTENDED_MSG_TYPE = 20
 
 const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
-function Peer(fileMetaData, download, listeners, sock, addr, checkID) { //, file, init) {
+function Peer(fileMetaData, download, sock, checkID) {
 
-	opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
-	Duplex.call(this, opts)
+	//opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
+	Duplex.call(this, { 'readableObjectMode' : true, 'objectMode' : true })
 
 	this.checkID = checkID
 	this.log = fs.createWriteStream('./peerlog.log')
@@ -60,56 +60,25 @@ function Peer(fileMetaData, download, listeners, sock, addr, checkID) { //, file
 
 	this.sendPieceStart = null
 	this.disconnects = 0 /////////////
+	
+	this.sock = sock
+	this.host = sock.remoteAddress
+	this.port = sock.remotePort
 
 	let self = this
 
-	this.addListeners(listeners)
+	var _handleDisconnect = () => {
 
-	if(sock) {
-
-		this.sock = sock
-		this.host = sock.remoteAddress
-		this.port = sock.remotePort
-
-	} else {
-
-		this.host = addr.host
-		this.port = addr.port
-
-		let sockOpts = { 'allowHalfOpen' : false }
-		this.sock = new net.Socket(sockOpts)
-		this.sock.connect(addr.port, addr.host)
-
-		this.sock.on('connect', () => {	
-			self.handshake()
-			self.state = self.STATES.sent_hshake
-
-		})
+		if(self.state == self.STATES.connected)
+			self.emit('disconnected', self)
+		self.state = self.STATES.disconnected
 
 	}
 
-	var handleDisconnect = () => {}
+	this.sock.on('close', _handleDisconnect)
+	this.sock.on('error', _handleDisconnect)
 
-	this.sock.on('close', () => {
-
-		//clearout request queues
-		//self.emit('sock_closed')
-		if(self.state == self.STATES.connected)
-			self.emit('disconnected', this)
-		self.state = self.STATES.disconnected
-
-	})
-
-	this.sock.on('error', () => {
-
-		//self.emit('sock_closed')
-		if(self.state == self.STATES.connected)
-			self.emit('disconnected', this)
-		self.state = self.STATES.disconnected
-
-	})
-
-	this.msgHandlers = { 'handshake': (this._pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
+	this.msgHandlers = { '_handshake': (this._pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
 		[CHOKE_MSG_TYPE] : (this._pChoke).bind(this), [UNCHOKE_MSG_TYPE] : (this._pUnchoke).bind(this), 
 		[INTERESTED_MSG_TYPE] : (this._pInterested).bind(this), [UNINTERESTED_MSG_TYPE] : (this._pUninterested).bind(this), 
 		[HAVE_MSG_TYPE] : (this._pHave).bind(this), [BITFIELD_MSG_TYPE] : (this._pBitfield).bind(this), 
@@ -140,30 +109,21 @@ Peer.prototype.piece = function(index, begin, piece) {
 	p.pipe(this.sock, {'end' : false, 'highWaterMark' : 2 ** 15})
 	this.sendPieceStart = Date.now()
 
-	p.on('data', ((data) => this.downloadBytes += data.length).bind(this))
+	let self = this
 
-	
+	p.on('data', ((data) => self.downloadBytes += data.length))
+
 	p.on('end', (()=> { 
 
-		//p.unpipe(this.sock)
-		this._finishRequest() 
-		this.downloadTime += (Date.now() - this.sendPieceStart)
-		this.emit('piece_sent', this)
+		self._finishRequest() 
+		self.downloadTime += (Date.now() - self.sendPieceStart)
+		self.emit('piece_sent', self)
 
-	}).bind(this))
+	}))
 
-	p.on('error', (()=> { 
+	p.on('error', this._finishRequest())
 
-		//p.unpipe(this.sock)
-		this._finishRequest() 
-
-	}).bind(this))
-
-	p.on('unpipe', (()=> { 
-
-		this._finishRequest() 
-
-	}).bind(this))
+	p.on('unpipe', this._finishRequest())
 	
 	p.end(this._makeMsg(PIECE_MSG_TYPE, index, begin, piece))
 
@@ -198,23 +158,21 @@ Peer.prototype._pHandshake = function (peerID, supportsDHT, supportsExten) {
 	this.supportsExten = supportsExten
 
 	if(!this.checkID(peerID.toString('hex'))) {//bad ID
-		console.log('reject handshake', peerID.toString('hex'))
+		console.log('reject _handshake', peerID.toString('hex'))
 		this.sock.end() //disconnect by closing socket
 		this.emit('reject id', this)
 		return
 	}
-	console.log('accepting handshake', peerID.toString('hex'), this.port, this.host)
-	if(this.state != this.STATES.sent_hshake) //already sent handshake
-		this.handshake()
+	console.log('accepting _handshake', peerID.toString('hex'), this.port, this.host)
+	if(this.state != this.STATES.sent_hshake) //already sent _handshake
+		this._handshake()
 
 	this.state = this.STATES.connected
 	
 	this.emit('connected', this)
-	//this.emit('new_pieces', this)
 
 	//this.exHandShake()
 	this.bitfield()
-
 
 	return true
 
@@ -248,18 +206,26 @@ Peer.prototype._pUninterested = function() {
 
 }
 
+//actually interested
 Peer.prototype.aInterested = function() {
  
 	return (this.pieces.difference(new NSet(this.download.pieces.keys())).size > 0)
-
+	//return (this.pieces.difference(new NSet(this.download.activePiece.keys)).size > 0)
 }
 
 //call on have or bitField message - also when downloader makes new activePiece - and piece downloaded
 Peer.prototype.updateInterested = function() {
-	
-	if(this.aInterested() && !this.interested) 
+
+	var _interest = () => this.pieces.difference(new NSet(this.download.activePieces.keys())).size > 0
+
+	/*if(this.aInterested() && !this.interested) 
 		this.sendInterested()
 	else if(!this.aInterested() && this.interested)
+		this.unInterested()*/
+
+	if(_interest() && !this.interested) 
+		this.sendInterested()
+	else if(!_interest() && this.interested)
 		this.unInterested()
 
 }
@@ -277,7 +243,6 @@ Peer.prototype._pHave = function(pieceIndex) {
 
 	this.pieces.add(pieceIndex)
 	//this.log.write("peer pieces " + Array.from(this.pieces.keys()))
-
 	this._newPieces()
 	
 }
@@ -330,6 +295,7 @@ Peer.prototype._pCancel = function (index, begin, length) {
 
 	if(this.pRequest != null && this.pRequest.index == index && this.pRequest.begin == begin && this.pRequest.length == length)
 		this.pRequest.p.unpipe(this.sock)
+
 	else {
 		let pos = this.pRequestList.findIndex( request => request.index == index && request.begin == begin && request.length == length)
 		if(pos != -1)
@@ -347,7 +313,21 @@ Peer.prototype._pPort = function (payload) {
 
 Peer.prototype.handshake = function() {
 
-	console.log(this.download.peerID, 'handshake', this.port, this.host)
+	let self = this
+	this.sock.on('connect', () => {
+
+		self._handshake()
+		self.state = self.STATES.sent_hshake
+
+	})
+
+	return this
+
+}
+
+Peer.prototype._handshake = function() {
+
+	console.log(this.download.peerID, '_handshake', this.port, this.host)
 	let nt = new Buffer(1)
 	nt.writeUInt8(0x13)
 
@@ -518,7 +498,7 @@ Peer.prototype._write = function(obj, encoding, callback) {
 	let exType = obj.exType
 	let handler 
 	
-	if(exType != undefined) { //either handshake or peer exchange
+	if(exType != undefined) { //either _handshake or peer exchange
 	
 		handler = this.msgHandlers[type][exType]
 		handler(obj.args)
@@ -576,11 +556,11 @@ class BitTorrentMsgParser extends Transform {
 		this.nextMsgLength = 4;
 		//reset keepalive timer
 
-		this.push( {type : 'handshake' , args: {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten} })
+		this.push( {type : '_handshake' , args: {'peerID': peerID, 'supportsDHT': supportsDHT, 'supportsExten': supportsExten} })
 
 	}
 
-	parseMsgLength(msg) { //always valid
+	parseMsgLength(msg) { 
 
 		if(msg.readUInt32BE(0) > 0) { //handle keepalive
 
@@ -606,11 +586,9 @@ class BitTorrentMsgParser extends Transform {
 		this.nextMsgParser = this.parseMsgLength;
 		this.nextMsgLength = 4
 
-		//reset keepalive timer
-
-		let msgType = this.getType(msg) //string
+		let msgType = this.getType(msg) 
 		msg = msg.slice(1)
-/////
+
 		let parsedMsg = { type : msgType, args : {} }
 
 		switch ( msgType ) {

@@ -223,8 +223,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.makeRequests()
 		this.piecelets = new Map()
 		return false
-
-
+		
 	}
 
 	writePiece(buf) {
@@ -249,13 +248,12 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
 				let chunklet = buf.slice( (chunkletStart - start) , chunkletEnd - start)
-				//console.log('writing', chunklet)
 				fs.createWriteStream( this.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd - 1} ).end(chunklet)
 
 			})
 
 		} catch (error) {
-			//console.log(error)
+
 			return false
 		}
 
