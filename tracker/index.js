@@ -1,16 +1,11 @@
 
 //var  magnetLink= 'magnet:?xt=urn:btih:32843bef0b20ba67b095ec47d923f90c64bc7787&dn=Wonder.Woman.2017.HDTS.1080P.x264&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969&tr=udp%3A%2F%2Fzer0day.ch%3A1337&tr=udp%3A%2F%2Fopen.demonii.com%3A1337&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969&tr=udp%3A%2F%2Fexodus.desync.com%3A6969'
-//const parsedUri = require('magnet-uri').decode(magnetLink)
-
-module.exports = {
-
-	'UDPTracker' : UDPTracker
-
-}
 
 const dgram = require('dgram')
 const randomBytes = require('crypto').randomBytes
-const dns = require('dns');
+const dns = require('dns')
+const request = require('request')
+const benDecode = require('bencode').decode
 
 const UDPRes = require('./UDPResponse.js')
 const AnnounceResp = UDPRes.AnnounceResp
@@ -36,11 +31,86 @@ var getAddr = function getAddressFromURL(url) {
 // addresses: [{"address":"2606:2800:220:1:248:1893:25c8:1946","family":6}]
 }
 
-function HTTPTracker() {
-	
+class HTTPTracker {
+
+	constructor(file, download, url) {
+
+		this.file = file
+		this.download = download
+		this.url = url.href
+		this.interval = null
+		this.default_timeout = 3000
+
+	}
+
+	async doAnnounce(port) {
+
+		var params = { 
+
+			info_hash: Buffer.from(this.file.infoHash,'hex').toString(), 
+			peer_id: Buffer.from(this.download.peerID, 'hex').toString(),
+			port : port,
+			uploaded : this.download.stats.uploaded,
+			downloaded : this.download.stats.downloaded,
+			left : this.download.stats.left,
+			event : this.download.stats.ev
+
+		}
+
+		let resp, decodedResp
+
+		try {
+
+			resp = await this.request(params)
+			decodedResp = benDecode(resp) 
+
+		} catch (error) {
+
+			console.log(error)
+			
+			return {}
+
+		}
+		
+		
+		let {interval, peers, complete, incomplete} = decodedResp || {}
+		this.interval = interval
+
+		return {
+
+			'numLeechers' : incomplete || 0,
+			'numSeeders' : complete || 0,
+			'interval' : this.interval || 600 * 1e3,
+			'peerList' : this.peers || []
+
+		}
+
+	}
+
+	request (params) {
+
+		new Promise( (resolve, reject) => {
+
+			let timeout = setTimeout(() => { reject('timeout') } , this.default_timeout)
+
+			request({url : this.url, qs : params}, function(err, response, body) {
+				console.log(response)
+				//console.log('response',response)
+				//console.log('body', body)
+				if(err)
+					reject(body)
+				else
+					resolve(body)
+
+			})
+
+		})
+
+	}
+
 }
 
-function UDPTracker(sock, url, infoHash, peerID) {
+function UDPTracker(sock, url, infoHash, peerID, stats) {
 
 	this.canConnect = true 
 	this.canConnectTimeout
@@ -55,8 +125,8 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	this.infoHash = infoHash
 	this.peerID = peerID
 
-	this.stats = null
-
+	//this.stats = null
+	this.stats = stats
 	//filled by tracker on announce
 	this.numLeechers = null,
 	this.numSeeders = null,
@@ -66,7 +136,8 @@ function UDPTracker(sock, url, infoHash, peerID) {
 	this.transactID = null
 	this.connectID = null;
 	this.connectIDEx = null;
-	this.timeoutInterval = 3000
+	this.default_timeout = 3000
+
 
 }
 
@@ -74,7 +145,8 @@ UDPTracker.prototype._sendAnnounceRequest = function(request) {
 
 	return new Promise( (resolve, reject) => {
 
-		let timeout = setTimeout(() => { reject('timeout') } , this.timeoutInterval)
+		let timeout = setTimeout(() => { reject('timeout') } , this.default_timeout)
+
 		this.client.once('message', (msg, rsinfo) => {
 			
 			if( new Response(msg).getAction() == UDPRes.ANNOUNCE_ACTION) {
@@ -99,7 +171,7 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 
 	return new Promise( (resolve, reject) => {
 
-		let timeout = setTimeout( () => { reject('timeout') } , this.timeoutInterval)
+		let timeout = setTimeout( () => { reject('timeout') } , this.default_timeout)
 
 		this.client.once('message', (msg, rsinfo) => {
 		
@@ -121,13 +193,12 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 
 }
 
-UDPTracker.prototype.doAnnounce = async function(stats, myPort) {
+UDPTracker.prototype.doAnnounce = async function(myPort) {
 
-	this.stats = stats
 	this.myPort = myPort
 
 	if(!this.canConnect) throw Error('to soon to connect')
-	this.stats = stats
+	//this.stats = stats
 
 	this.client.on('error', (err) => {
 		console.log("oops: ${err.stack}"); 
@@ -154,10 +225,13 @@ UDPTracker.prototype.doAnnounce = async function(stats, myPort) {
 		this.canConnect = false
 		this.canConnectTimeout = setTimeout( (()=> { this.canConnect = true }).bind(this), this.interval) //seconds or ms ??
 
-		this.peerList = annResp.getPeerList()
+		let peerList = annResp.getPeerList() || []
+		this.peerList = peerList.map( pair => {return {'ip': pair[0], 'port' : pair[1]}} )
 
 	} catch (error) {
+
 		console.log(error)
+
 	}
 
 	return { 
@@ -207,3 +281,10 @@ UDPTracker.prototype._buildAnnounceReq = function() {
 
 }
 
+
+module.exports = {
+
+	'UDPTracker' : UDPTracker,
+	'HTTPTracker' : HTTPTracker
+
+}
