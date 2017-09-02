@@ -1,6 +1,6 @@
 
 
-Downloader = require('./swarm/index2.js').Downloader
+Downloader = require('./swarm/index.js').Downloader
 
 
 var client1 = new Downloader(6012)
