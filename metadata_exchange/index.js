@@ -3,6 +3,7 @@
 const EXTENDED_MSG_TYPE = 20 
 const METADATAEX_MSG_TYPE = 1
 //PPEEREX_MSG_TYPE
+const METADATA_PIECE_LEN = 2 ** 16
 
 benEncode = require('bencode').encode
 
@@ -10,16 +11,49 @@ benEncode = require('bencode').encode
 	Peer = MetaDataExchange(PeerExchange(Peer))
 	UT_METADATA(UT_PEEREX(Peer))
 	ut_metadata(ut_peerex(Peer))
-	MetaData(PeerEx(Peer))
+	UTMetaData(PeerEx(Peer))
 */
 
-let MetaData = (SuperClass) => class MetaDataEx extends SuperClass {
+let UTMetaDataEx = (SuperClass) => class MetaDataEx extends SuperClass {
 
-	constructor(args...) {
-		super(args)
-		this.recvExtensions['ut_metadata'] = [PEEREX_MSG_TYPE]
-		this.msgHandler[EXTENDED_MSG_TYPE][METADATAEX_MSG_TYPE] = this.router
-		this.metaInfoPieces = []
+	constructor( ...args ) {
+
+		super(...args)
+
+		this.recvExtensions['ut_metadata'] = [METADATAEX_MSG_TYPE]
+		this.msgHandlers[EXTENDED_MSG_TYPE][METADATAEX_MSG_TYPE] = this.router
+		this.metaInfoPieces = new Map()
+		this.total_size = null
+
+		let self = this
+		
+		this.on('connected', () => {
+
+			if(self.supportedExtensions['ut_metadata'] && !self.fileMetaData.metaInfoRaw)
+				self.metaDataExRequest(0)
+
+		})
+		
+
+	}
+
+	isSeeder() {
+
+		if(!this.fileMetaData.metaInfoRaw) 
+			return false
+		else 
+			super.isSeeder()
+
+	}
+
+
+	bitfield() {
+
+		if(!this.fileMetaData.metaInfoRaw)
+			return
+		else 
+			super.bitfield()
+
 	}
 
 	router(args) {
@@ -42,8 +76,8 @@ let MetaData = (SuperClass) => class MetaDataEx extends SuperClass {
 
 		let piece = args.piece
 
-		if(this.file.info != null)
-			this.metaDataExData(piece, this.file.metaInfoRaw.slice(piece * (2 ** 16), (piece + 1) * 2 ** 16))
+		if(this.fileMetaData.metaInfoRaw != null)
+			this.metaDataExData(piece, this.MetaData.metaInfoRaw.slice(piece * METADATA_PIECE_LEN, (piece + 1) * METADATA_PIECE_LEN))
 		else 
 			this.metaDataExDataReject(piece)
 
@@ -52,14 +86,27 @@ let MetaData = (SuperClass) => class MetaDataEx extends SuperClass {
 	pMetaDataExData(args) {
 
 		let { piece, total_size, data } = args
+		this.total_size = total_size
 
-		this.metaInfoPieces.push({'piece': piece, 'data': data})
+		this.metaInfoPieces.set(piece, data)
+		if(total_size && this.metaInfoPieces.size * METADATA_PIECE_LEN < total_size) {
 
-		//if(this.metaInfoPieces.map(infoPieces => infoPieces.data.length).reduce( (a,b) => a + b, 0 )
-		//	== total_size) {
-			//this.file.info = this.metaInfoPieces.map(infoPieces => infoPieces.data).reduce( (a,b) => Buffer.concat([a,b]), Buffer.alloc(0))
-			//check hash
-		//}
+			let numPieces = Math.ceil(total_size / METADATA_PIECE_LEN)
+			let peicesLeft = Array.from((new NSet([...Array(numPieces).keys()])).difference(new NSet(this.metaInfoPieces.keys())))
+			this.metaDataExRequest(piecesLeft[0])
+
+		} else {
+
+			let buf = new Buffer(0)
+
+			for (index of [...Array(numPieces).keys()]) {
+				buf = Buffer.concat(buf, this.metaInfoPieces(index))
+			}
+
+			this.fileMetaData.metaInfoRaw = buf
+			this.emit('got_meta_data', buf)
+
+		}
 
 	}
 
@@ -68,6 +115,19 @@ let MetaData = (SuperClass) => class MetaDataEx extends SuperClass {
 		let {piece} = args
 
 	}
+
+	piecesLeft() {
+
+		if(this.total_size) {
+
+
+			this.metaInfoPieces
+
+		}
+
+		return null
+
+	} 
 
 	metaDataExRequest(index) {
 
@@ -93,5 +153,5 @@ let MetaData = (SuperClass) => class MetaDataEx extends SuperClass {
 }
 
 module.exports = {
-	MetaData : MetaData
+	UTMetaDataEx : UTMetaDataEx
 }

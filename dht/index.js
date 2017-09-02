@@ -142,7 +142,7 @@ class DHT {
 
 	}
 
-	forceRefreshBuckets() {
+	/*forceRefreshBuckets() {
 
 		this.buckets.forEach( bucket => {
 
@@ -163,25 +163,28 @@ class DHT {
 
 		})
 
-	}
+	}*/
 
-	refreshBuckets() {
+	refreshBuckets(force) {
 
 		this.buckets.forEach( bucket => {
 
 			let lastChanged = Math.max(bucket.lastChanged, ...(bucket.nodeIDs.map( nodeID => this._getNode(nodeID).lastRespReq )))
 			
-			if(Date.now() - lastChanged > 15 * 60 * 1e3) {
+			if(Date.now() - lastChanged > 15 * 60 * 1e3 || force) {
 
 				let rand = Math.floor(Math.random() * bucket.nodeIDs.length)
 				let node 
+				//let allBad = bucket.nodeIDs.every( id => map.get(id).state == NODE_STATE.BAD )
 
 				if(bucket.nodeIDs.length == 0) {
+
 					let min = bucket.min
 					let max = bucket.max
 					let randIDNum = min + Math.random() * (max - min)
 					let randID = randIDNum.toString(16)
 					node = Buffer.from(randID, 'hex')
+
 				} else {
 					node = bucket.nodeIDs[rand]
 				}
@@ -235,7 +238,7 @@ class DHT {
 		DHTData.buckets.forEach( bucket => { self.buckets.push( new Bucket(bucket.min, bucket.max)) })
 		DHTData.buckets.forEach(bucket => bucket.nodeIDs.forEach( id => self.makeNode(id, DHTData.addressBook[id].port, DHTData.addressBook[id].host)) )
 
-		this.forceRefreshBuckets()
+		this.refreshBuckets(true)
 		this.refreshLoop = setInterval((this.refreshBuckets).bind(this), 15 * 60 * 1e3)
 
 
@@ -289,7 +292,7 @@ class DHT {
 		let ret = await this.findNodeIter(this.myNodeID) //builds dht
 
 		this.refreshLoop = setInterval((this.refreshBuckets).bind(this), 15 * 60 * 1e3)
-		this.forceRefreshBuckets()
+		this.refreshBuckets(true)
 
 		return ret
 
@@ -298,7 +301,7 @@ class DHT {
 	//returns [peers] and inserts this peer into mainline DHT
 	async announce(infoHash, port) {
 
-		let [peers, nodes] = await getPeersIter(infoHash)
+		let [peers, nodes] = await this.getPeersIter(infoHash)
 
 		let self = this
 		nodes.forEach(node => self.getNode(node).announcePeer(infoHash, port))
@@ -499,7 +502,7 @@ class DHT {
 
 		let nodeIDs = flatten(this.buckets.map(bucket => bucket.getBucketNodeIDs()))
 		
-		nodeIDs.sort(xorCompare(id))
+		nodeIDs.sort(xorCompare(id)).filter(id => this._getNode(id).state != NODE_STATE.BAD )
 		let kClosestNodeIDs = nodeIDs.slice(0, 10)
 
 		let node, myNode, hasMyNodeID

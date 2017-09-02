@@ -3,6 +3,7 @@
 var assert = require('assert')
 var sinon = require('sinon')
 var expect = require('chai').expect
+var Peer = require('./index.js').Peer
 
 describe('', function() {
 

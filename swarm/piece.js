@@ -9,7 +9,7 @@ An active piece object as here
 
 
 */
-// 59506688 to 59572224
+
 var readStreamFunc = (path, start, end) => {
 
 	return new Promise( (resolve, reject) => {
@@ -44,7 +44,6 @@ var Pieces = (file) => class Piece {
 
 	readPiece() {
 
-		//let start = this.index * this.normalPieceLength, end = start + this.pieceLength
 		let start = 0, end = this.pieceLength
 		return this.readPiecelet(start, end)
 
@@ -72,8 +71,6 @@ var Pieces = (file) => class Piece {
 			chunks = await Promise.all( fileBounds.map( async bound => {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
-			//	console.log('index:', this.index)
-			//	console.log('reading from', chunkletStart, "to", chunkletEnd)
 
 				try {
 
@@ -81,7 +78,6 @@ var Pieces = (file) => class Piece {
 
 				} catch (error) {
 
-				//	console.log(error)
 					return null
 
 				}
@@ -152,9 +148,12 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.requests = []
 		var gen = this.nextPiecelet()
 		var next = gen.next()
+
 		while(!next.done) {
+
 			this.requests.push(next.value)
 			next = gen.next()
+
 		}
 
 	}
@@ -202,9 +201,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 			let lefts = Array.from(this.piecelets.keys()).filter( k => Number(k.split(',')[0]) <= left)
 			let maxRight = Math.max( ...lefts.map( k =>  Number(k.split(',')[1]) ) )
-			//let maxRight = lefts.reduce( ( maxR, left) => {
-
-			//} , 0)
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
 			let piecelet = this.piecelets.get(interval)
 
@@ -223,7 +219,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.makeRequests()
 		this.piecelets = new Map()
 		return false
-		
+
 	}
 
 	writePiece(buf) {

@@ -122,7 +122,6 @@ Peer.prototype.piece = function(index, begin, piece) {
 	}))
 
 	p.on('error', this._finishRequest())
-
 	p.on('unpipe', this._finishRequest())
 	
 	p.end(this._makeMsg(PIECE_MSG_TYPE, index, begin, piece))
@@ -164,15 +163,15 @@ Peer.prototype._pHandshake = function (peerID, supportsDHT, supportsExten) {
 		return
 	}
 	console.log('accepting _handshake', peerID.toString('hex'), this.port, this.host)
-	if(this.state != this.STATES.sent_hshake) //already sent _handshake
+	if(this.state != this.STATES.sent_hshake) {
 		this._handshake()
+		this.exHandShake()
+		this.bitfield()
+	}
 
 	this.state = this.STATES.connected
 	
 	this.emit('connected', this)
-
-	//this.exHandShake()
-	this.bitfield()
 
 	return true
 
@@ -287,7 +286,7 @@ Peer.prototype._pPiece = function (index, begin, piece, uploadTime) { //index, b
 	this.uploadBytes += piece.length
 	this.uploadTime += uploadTime
 
-	this.emit('peer_piece', this, index, begin, piece, uploadTime)
+	this.emit('peer_piece', this, index, begin, piece)
 
 }
 
@@ -335,11 +334,11 @@ Peer.prototype._handshake = function() {
 	let buf = Buffer.concat([nt, bitTorrent, Buffer.alloc(8), this.fileMetaData.infoHash, Buffer.from(this.download.peerID,'hex')])
 	
 	//only check extension supported by this client
-	//buf.writeUInt8(0x10, 25) 
-	//buf.writeUInt8(0x01, 27)
+	buf.writeUInt8(0x10, 25) 
+	buf.writeUInt8(0x01, 27)
 	this.push(buf)
 
-	//this.exHandShake()
+	this.exHandShake()
 
 }
 
@@ -361,7 +360,7 @@ Peer.prototype._pExHandShake = function(payload) {
 
 	let {m, p, v, yourip, ipv6, ipv4, reqq, metadata_size} = payload
 	
-	this.fileMetaData.infoSize = metadata_size
+	this.fileMetaData.metaInfoSize = metadata_size
 	this.m = m
 	this.pVersion = v
 
@@ -633,6 +632,9 @@ class BitTorrentMsgParser extends Transform {
 	}
 
 	parseBitFieldMsg(msg) {
+
+		if(!this.file.numPieces)
+			return 
 
 		let bitField = []
 		let self = this
