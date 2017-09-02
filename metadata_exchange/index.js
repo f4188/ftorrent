@@ -37,7 +37,7 @@ let UTMetaDataEx = (SuperClass) => class MetaDataEx extends SuperClass {
 
 	}
 
-	isSeeder() {
+	/*isSeeder() {
 
 		if(!this.fileMetaData.metaInfoRaw) 
 			return false
@@ -54,7 +54,7 @@ let UTMetaDataEx = (SuperClass) => class MetaDataEx extends SuperClass {
 		else 
 			super.bitfield()
 
-	}
+	}*/
 
 	router(args) {
 

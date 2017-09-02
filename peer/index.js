@@ -62,8 +62,6 @@ function Peer(fileMetaData, download, sock, checkID) {
 	this.disconnects = 0 /////////////
 	
 	this.sock = sock
-	this.host = sock.remoteAddress
-	this.port = sock.remotePort
 
 	let self = this
 
@@ -111,18 +109,18 @@ Peer.prototype.piece = function(index, begin, piece) {
 
 	let self = this
 
-	p.on('data', ((data) => self.downloadBytes += data.length))
+	p.on('data', (data) => { self.downloadBytes += data.length })
 
-	p.on('end', (()=> { 
+	p.on('end', () => { 
 
 		self._finishRequest() 
 		self.downloadTime += (Date.now() - self.sendPieceStart)
 		self.emit('piece_sent', self)
 
-	}))
+	})
 
-	p.on('error', this._finishRequest())
-	p.on('unpipe', this._finishRequest())
+	p.on('error', (this._finishRequest).bind(this) ) 
+	p.on('unpipe', (this._finishRequest).bind(this) )
 	
 	p.end(this._makeMsg(PIECE_MSG_TYPE, index, begin, piece))
 
@@ -162,7 +160,8 @@ Peer.prototype._pHandshake = function (peerID, supportsDHT, supportsExten) {
 		this.emit('reject id', this)
 		return
 	}
-	console.log('accepting _handshake', peerID.toString('hex'), this.port, this.host)
+
+	console.log('accepting _handshake', peerID.toString('hex'))
 	if(this.state != this.STATES.sent_hshake) {
 		this._handshake()
 		this.exHandShake()
@@ -209,7 +208,7 @@ Peer.prototype._pUninterested = function() {
 Peer.prototype.aInterested = function() {
  
 	return (this.pieces.difference(new NSet(this.download.pieces.keys())).size > 0)
-	//return (this.pieces.difference(new NSet(this.download.activePiece.keys)).size > 0)
+
 }
 
 //call on have or bitField message - also when downloader makes new activePiece - and piece downloaded
@@ -217,15 +216,11 @@ Peer.prototype.updateInterested = function() {
 
 	var _interest = () => this.pieces.difference(new NSet(this.download.activePieces.keys())).size > 0
 
-	/*if(this.aInterested() && !this.interested) 
-		this.sendInterested()
-	else if(!this.aInterested() && this.interested)
-		this.unInterested()*/
-
 	if(_interest() && !this.interested) 
 		this.sendInterested()
 	else if(!_interest() && this.interested)
 		this.unInterested()
+
 
 }
 
@@ -306,7 +301,7 @@ Peer.prototype._pCancel = function (index, begin, length) {
 Peer.prototype._pPort = function (payload) {
 
 	this.nodePort = payload
-	this.emit('DHT_port', payload, this.host)
+	this.emit('DHT_port', payload)
 
 }
 
@@ -326,7 +321,6 @@ Peer.prototype.handshake = function() {
 
 Peer.prototype._handshake = function() {
 
-	console.log(this.download.peerID, '_handshake', this.port, this.host)
 	let nt = new Buffer(1)
 	nt.writeUInt8(0x13)
 
@@ -339,6 +333,7 @@ Peer.prototype._handshake = function() {
 	this.push(buf)
 
 	this.exHandShake()
+	this.bitfield()
 
 }
 

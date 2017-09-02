@@ -24,8 +24,6 @@ const NUM_OUTSTANDING_REQS = 200
 const NUM_ACTIVE_PIECES = 12
 const NUM_CONNECTIONS = 50
 
-var i = 0
-
 var byFreq2 = ( arrSet ) => {
 
 	let freqs = new Map()
@@ -109,6 +107,7 @@ class Swarm extends EventEmitter {
 				if(!stats.has(peer.peerID)) 
 					stats.set(peer.peerID, {'uploadedTime' : 0, 'downloadTime' : 0,'uploadBytes': 0, 'downloadBytes': 0,
 						'disconnects' : 0, 'firstConnect' : Date.now()})
+
 				self.emit('peer_connected')
 
 			},
@@ -284,16 +283,7 @@ class Swarm extends EventEmitter {
 
 	}
 
-	/*piecesByFreq (peers) {
 
-		peers = peers || new NSet(this.peers.keys())
-
-		let allPieces = this.allPieces(peers), file = this.fileMetaData
-		let interestedPieces = Array.from(allPieces).filter( pIdx => !file.pieces.has(pIdx) && !file.activePieces.has(pIdx))
-		//return byFreq(dontHavePieceList, 'pieceIndex').map( pair => pair.key)
-		return interestedPieces
-
-	} */
 
 	piecesByFreq2 (peers) {
 
@@ -341,91 +331,79 @@ class Swarm extends EventEmitter {
 
 	get leechers() {
 
-		return new NSet( Array.from(this.peers.keys()).filter(peer => !this.peers.get(peer).isSeeder()) )
+		return this.peers.filter(peer => this.peers.get(peer).isSeeder()).getSet()
 
 	}
 
 	get seeders() {
 
 		return this.peers.filter( peer => peer.isSeeder()).getSet()
-		//return new NSet(Array.from(this.peers.keys()).filter(peer => this.peers.get(peer).isSeeder()))
 
 	}
 
 	get optimisticUnchokePeers () {
 
 		return this.peers.filter( peer => peer.optUnchoke ).getSet()
-		//return new NSet(Array.from(this.peers.keys()).filter( peer => this.peers.get(peer).optUnchoke ))
 
 	}
 
 	get unchokedPeers () {
 
 		return this.peers.filter( peer => !peer.choked).getSet()
-		//return new NSet(Array.from(this.peers.keys()).filter(peer => !this.peers.get(peer).choked))
 
 	}
 
 	get chokedPeers () {
 
 		return this.peers.getSet().difference(this.unchokedPeers)
-		//return new NSet(Array.from(this.peers.keys())).difference(this.unchokedPeers)
 
 	}
 
 	get amUnchokedPeers () {
 
 		return this.peers.filter( peer => !peer.pChoked).getSet()
-		//return new NSet(Array.from(this.peers.keys()).filter(peer => !this.peers.get(peer).pChoked))
 
 	}
 
 	get amChokedPeers () {
 
 		return this.peers.getSet().difference(this.amUnchokedPeers)
-		//return new NSet(Array.from(this.peers.keys())).difference(this.amUnchokedPeers)
 
 	}
 
 	get interestedPeers () {
 
 		return this.peers.filter( peer => peer.interested).getSet()
-		//return new NSet(Array.from(this.peers.keys()).filter(peer => this.peers.get(peer).interested))
 
 	}
 
 	get aInterestedPeers () {
 
 		return this.peers.filter(peer => peer.aInterested).getSet()
-		//return new NSet(Array.from(this.peers.values()).filter(peer => peer.aInterested ).map(peer => peer.peerID))
 
 	}
 
 	get unInterestedPeers () {
 
 		return this.peers.getSet().difference(this.interestedPeers)
-		//return new NSet(Array.from(this.peers.keys())).difference(this.interestedPeers)
 
 	}
 	 
 	get amInterestedPeers () {
 
 		return this.peers.filter( peer => peer.pInterested).getSet()
-		//return new NSet(Array.from(this.peers.keys()).filter( peer => this.peers.get(peer).pInterested ))
 
 	}
 
 	get amUnInterestedPeers () {
 
 		return this.peers.getSet().difference(this.amInterestedPeers)
-		//return new NSet(Array.from(this.peers.keys())).difference(this.amInterestedPeers)
 
 	}
 
 	get metaInfoExPeers () {
 
 		return this.peers.filter( peer => peer.supportedExtensions['ut_metadata']).getSet()
-		//return new NSet(this.peers.entries().filter(tuple => tuple[1].supportedExtensions['ut_metadata']).map(tuple => tuple[0]))
 
 	}
 
@@ -527,6 +505,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 			let piece = this.pieces.get(index)
 			let buf = await piece.readPiecelet(begin, length)
+			console.log('sending piece')
 			peer.piece(index, begin, buf)
 
 	}	
@@ -991,7 +970,7 @@ Downloader.prototype.DHTAnnounce = async function() {
 
 	let dht = this.dht || new DHT(this.dhtPort, "")
 	dht.bootstrap()
-	
+
 	let peerList = await dht.announce(this.fileMetaData.infoHash, this.myPort)
 	this.addPeers(peerList)
 
@@ -1050,7 +1029,7 @@ class Client {
 		this.downloadeders = []
 	}
 
-	add() {
+	addTorrent() {
 
 		let downloader = new Downloader()
 

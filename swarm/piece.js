@@ -7,8 +7,9 @@ A piece object with a verify method
 
 An active piece object as here
 
-
 */
+
+var fs = require('graceful-fs')
 
 var readStreamFunc = (path, start, end) => {
 
@@ -17,9 +18,9 @@ var readStreamFunc = (path, start, end) => {
 		let buf = new Buffer(0)
 		let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
 
-		pieceStream.on('error', (error) => reject(error))
-		pieceStream.on('data', (data) => {buf = Buffer.concat([buf, data])})
-		pieceStream.on('end', ()=>{ resolve(buf) })
+		pieceStream.on('error', (error) => { reject(error) } )
+		pieceStream.on('data', (data) => { buf = Buffer.concat([buf, data]) })
+		pieceStream.on('end', () => { resolve(buf) })
 
 	})
 

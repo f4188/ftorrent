@@ -14,11 +14,7 @@ const Response = UDPRes.Response
 
 var getAddr = function getAddressFromURL(url) {
 	
-	const options = {
-		//family: 6,
-		all : false
-		//hints: dns.ADDRCONFIG | dns.V4MAPPED,
-	}
+	const options = { all : false }
 	
 	return new Promise ((resolve ,reject) => {
 		dns.lookup(url, options, (err, address, family) => {
@@ -28,7 +24,20 @@ var getAddr = function getAddressFromURL(url) {
 				resolve(address)
 		})
 	})
-// addresses: [{"address":"2606:2800:220:1:248:1893:25c8:1946","family":6}]
+
+}
+
+
+getUDPSocket = function(port) { //run tests
+
+	let sock = dgram.createSocket('udp4').bind(port)
+
+	return new Promise ( (resolve, reject) => {
+		
+		sock.on('listening', () => { resolve(sock) } )
+
+	})
+
 }
 
 class HTTPTracker {
@@ -110,12 +119,12 @@ class HTTPTracker {
 
 }
 
-function UDPTracker(sock, url, infoHash, peerID, stats) {
+function UDPTracker(url, infoHash, peerID, stats) {
 
 	this.canConnect = true 
 	this.canConnectTimeout
 
-	this.client = sock
+	//this.client = sock
 	this.address = net.isIP(url.hostname) ?  url.hostname : this.address = null
 
 	//tracker address
@@ -174,7 +183,7 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 		let timeout = setTimeout( () => { reject('timeout') } , this.default_timeout)
 
 		this.client.once('message', (msg, rsinfo) => {
-		
+			console.log(msg)
 			if( new Response(msg).getAction() == UDPRes.CONNECT_ACTION) {
 
 				clearTimeout(timeout)
@@ -194,6 +203,8 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 }
 
 UDPTracker.prototype.doAnnounce = async function(myPort) {
+
+	this.client = await getUDPSocket()
 
 	this.myPort = myPort
 
