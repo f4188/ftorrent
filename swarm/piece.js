@@ -1,12 +1,8 @@
 
 /*
-
-Pieces object that reads and writes piecelets
-
-A piece object with a verify method
-
-An active piece object as here
-
+ * Pieces object that reads and writes piecelets
+ * A piece object with a verify method
+ * An active piece object as here
 */
 
 var fs = require('graceful-fs')
@@ -216,7 +212,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		if( hash == this.hash)
 			return this.writePiece(buf)
 
-		//startover
 		this.makeRequests()
 		this.piecelets = new Map()
 		return false

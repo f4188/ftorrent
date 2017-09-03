@@ -137,7 +137,7 @@ let UTMetaDataEx = (SuperClass) => class MetaDataEx extends SuperClass {
 	}
 
 	metaDataExData(index, data) {
-
+		console.log('sending metaData')
 		let dataMsg = benEncode({'msg_type': 1, 'piece': index, 'total_size': this.file.metaInfoSize})
 		this.push(this.makeMsg([EXTENDED_MSG_TYPE, PMETADATAEX_MSG_TYPE], dataMsg, data))
 

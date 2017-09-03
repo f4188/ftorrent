@@ -3,7 +3,7 @@ Duplex = require('stream').Duplex
 Transform = require('stream').Transform
 benDecode = require('bencode').decode 
 benEncode = require('bencode').encode
-
+speedometer = require('speedometer')
 PassThrough = require('stream').PassThrough
 
 const HANDSHAKE_LENGTH = 1 + 19 + 8 + 20 + 20 
@@ -29,7 +29,6 @@ function Peer(fileMetaData, download, sock, checkID) {
 	Duplex.call(this, { 'readableObjectMode' : true, 'objectMode' : true })
 
 	this.checkID = checkID
-	this.log = fs.createWriteStream('./peerlog.log')
 
 	this.fileMetaData = fileMetaData
 	this.download = download
@@ -52,14 +51,6 @@ function Peer(fileMetaData, download, sock, checkID) {
 	
 	this.peerID = null// = fileMetaData.peerID
 	this.myPeerID = null
-
-	this.uploadBytes = 0
-	this.uploadTime = 0
-	this.downloadBytes = 0
-	this.downloadTime = 0
-
-	this.sendPieceStart = null
-	this.disconnects = 0 /////////////
 	
 	this.sock = sock
 
@@ -105,16 +96,13 @@ Peer.prototype.piece = function(index, begin, piece) {
 	let p = new PassThrough() //set highwatermark
 	this.pRequest.p = p
 	p.pipe(this.sock, {'end' : false, 'highWaterMark' : 2 ** 15})
-	this.sendPieceStart = Date.now()
+	//this.sendPieceStart = Date.now()
 
 	let self = this
-
-	p.on('data', (data) => { self.downloadBytes += data.length })
 
 	p.on('end', () => { 
 
 		self._finishRequest() 
-		self.downloadTime += (Date.now() - self.sendPieceStart)
 		self.emit('piece_sent', self)
 
 	})
@@ -154,18 +142,20 @@ Peer.prototype._pHandshake = function (peerID, supportsDHT, supportsExten) {
 	this.supportsDHT = supportsDHT
 	this.supportsExten = supportsExten
 
-	if(!this.checkID(peerID.toString('hex'))) {//bad ID
-		console.log('reject _handshake', peerID.toString('hex'))
-		this.sock.end() //disconnect by closing socket
+	if(!this.checkID(peerID.toString('hex'))) {
+
+		this.sock.end() 
 		this.emit('reject id', this)
 		return
+
 	}
 
-	console.log('accepting _handshake', peerID.toString('hex'))
 	if(this.state != this.STATES.sent_hshake) {
+
 		this._handshake()
 		this.exHandShake()
 		this.bitfield()
+
 	}
 
 	this.state = this.STATES.connected
@@ -236,7 +226,6 @@ Peer.prototype._newPieces = function(pieceIndex) {
 Peer.prototype._pHave = function(pieceIndex) { 
 
 	this.pieces.add(pieceIndex)
-	//this.log.write("peer pieces " + Array.from(this.pieces.keys()))
 	this._newPieces()
 	
 }
@@ -244,7 +233,6 @@ Peer.prototype._pHave = function(pieceIndex) {
 Peer.prototype._pBitfield = function (pieceList) { 
 
 	let pieces = this.pieces
-	this.log.write("peer pieces " + Array.from(pieces.keys()))
 	pieceList.forEach( (pieceIndex) => { pieces.add(pieceIndex) } )
 	this._newPieces()
 	
@@ -275,11 +263,13 @@ Peer.prototype._fulfillRequest = function() { //expects pRequest to be null and 
 
 }
 
-Peer.prototype._pPiece = function (index, begin, piece, uploadTime) { //index, begin, length, piece
+Peer.prototype._pPiece = function (index, begin, piece) {//, uploadTime) {
 
-	if(this.pChoked) return //discard piece
-	this.uploadBytes += piece.length
-	this.uploadTime += uploadTime
+	//if(this.pChoked) 
+	//	return 
+
+	//this.uploadBytes += piece.length
+	//this.uploadTime += uploadTime
 
 	this.emit('peer_piece', this, index, begin, piece)
 
@@ -382,7 +372,6 @@ Peer.prototype.exHandShake = function() {
 //make sep factory object
 Peer.prototype._makeMsg = function(type, ...args) { // ...args = [int1, int2, buffer1, int3, ... ]
 
-	this.log.write( Date.now() + " | making msg " + type + " " + args.slice(0, 3) + "\n")
 	var bufferFrom = (num) => { let buf = Buffer.alloc(4); buf.writeUInt32BE(num); return buf}
 
 	let buf = Buffer.alloc(6)
@@ -521,9 +510,9 @@ class BitTorrentMsgParser extends Transform {
 		this.msgBuffer = Buffer.alloc(0);
 		this.nextMsgLength = HANDSHAKE_LENGTH;
 		this.nextMsgParser = this.parseHandshake //initially
-		this.recievingPiece = false
-		this.recvPieceStart = null
-		this.uploadTime = null
+	//	this.recievingPiece = false
+	//	this.recvPieceStart = null
+	//	this.uploadTime = null
 
 	}
 
@@ -570,7 +559,7 @@ class BitTorrentMsgParser extends Transform {
 
 	}
 	
-	parseMsgPayLoad(msg, uploadTime) { //maybe garbled
+	parseMsgPayLoad(msg) {//, uploadTime) { //maybe garbled
 
 		//this.keepAliveTimer goes off if no message for _ min/sec
 		//checks if nothing going in the other direction
@@ -596,7 +585,7 @@ class BitTorrentMsgParser extends Transform {
 				parsedMsg.args = this.parseRequestMsg(msg)
 				break
 			case PIECE_MSG_TYPE :  
-				parsedMsg.args = this.parsePieceMsg(msg, uploadTime)
+				parsedMsg.args = this.parsePieceMsg(msg)//, uploadTime)
 				break
 			case CANCEL_MSG_TYPE : 
 				parsedMsg.args = this.parseCancelMsg(msg)
@@ -665,11 +654,11 @@ class BitTorrentMsgParser extends Transform {
 
 	}
 
-	parsePieceMsg(msg, uploadTime) {
+	parsePieceMsg(msg) {//, uploadTime) {
 
 		let index = msg.readUInt32BE(0)
 		let begin = msg.readUInt32BE(4)
-		return { index : index, begin : begin, piece : msg.slice(8), uploadTime : uploadTime }
+		return { index : index, begin : begin, piece : msg.slice(8) }//, uploadTime : uploadTime }
 
 	}	
 
@@ -688,8 +677,6 @@ class BitTorrentMsgParser extends Transform {
 	//recvPiece true for this time
 	_transform(chunk, encoding, callback) {
 
-		let wasRecvPiece = this.recievingPiece
-		let uploadTime = null
 		this.msgBuffer = Buffer.concat([this.msgBuffer, chunk])
 
 		var nextMsg
@@ -698,25 +685,15 @@ class BitTorrentMsgParser extends Transform {
 			
 			nextMsg = this.msgBuffer.slice(0,this.nextMsgLength)
 			this.msgBuffer = this.msgBuffer.slice(this.nextMsgLength)
-
-			if(this.recievingPiece) 
-				uploadTime == Date.now() - this.recvPieceStart
-
-			this.nextMsgParser(nextMsg, uploadTime)
+			this.nextMsgParser(nextMsg) 
 
 	 	}
-
-	 	this.recievingPiece = this.msgBuffer.length > 4 && this.msgBuffer.readUInt8(4) == PIECE_MSG_TYPE
-	 	if(!wasRecvPiece && this.recievingPiece) {
-	 		this.recvPieceStart = Date.now()
-	 	} 
 
 	 	callback()
 	
 	}
 
 }
-
 
 module.exports = {
 

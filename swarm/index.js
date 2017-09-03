@@ -1,11 +1,10 @@
 
-net = require('net')
-
 const benDecode = require('bencode').decode 
 const benEncode = require('bencode').encode
 const async = require('async')
-
+const speedometer = require('speedometer')
 EventEmitter = require('events').EventEmitter
+//memwatch = require('memwatch')
 
 const NSet = require('../lib/NSet.js').NSet
 const NMap = require('../lib/NSet.js').NMap
@@ -34,14 +33,14 @@ var byFreq2 = ( arrSet ) => {
 
 			let count = freqs.get(pIdx)
 			if(count || count == 0)
-				freqs.set(pIdx, count++)
+				freqs.set(pIdx, ++count)
 			else 
-				freqs.set(pIdx, 1) 
+				freqs.set(pIdx, 0) 
 
 		}
 	}
 
-	return Array.from(freqs.entries()).sort( (p1, p2) => p1[1] - p2[1]).map( tuple => tuple[0] )
+	return Array.from(freqs.entries()).sort( (p1, p2) => p1[1] - p2[1])//.map( tuple => tuple[0] )
 
 }
 
@@ -53,6 +52,7 @@ class Swarm extends EventEmitter {
 
 		this.peerStats = new NMap()
 		this.peers = new NSet()//new NMap()
+		this.connLoop = null
 		
 		this.fileMetaData = fileMetaData
 		this.download = download
@@ -68,11 +68,22 @@ class Swarm extends EventEmitter {
 
 			'connected' : ( peer ) => {
 
-				let stats = self.peerStats
+				if(!self.peerStats.has(peer.peerID)) {
 
-				if(!stats.has(peer.peerID)) 
-					stats.set(peer.peerID, {'uploadedTime' : 0, 'downloadTime' : 0,'uploadBytes': 0, 'downloadBytes': 0,
-						'disconnects' : 0, 'firstConnect' : Date.now()})
+					let stats =  { 'disconnects' : 0, 'firstConnect' : Date.now(), 'host' : peer.sock.remoteAddress, 
+						'port' : peer.sock.remotePort, 'status' : 1, 'online' : 1, dSpeed : speedometer(60), 
+						downRate : 0, uSpeed : speedometer(60), upRate : 0 , pruned : 0 }
+
+					self.peerStats.set(peer.peerID, stats)
+					self.peerStats.set(stats.host + ":" + stats.port, stats)
+
+					peer.sock.on('data', (data) => { stats.downRate = stats.dSpeed(data.length) } )
+					peer.on('data', (data) => { stats.upRate = stats.uSpeed(data.length) } )
+
+				}
+
+				else 
+					self.peerStats.get(peer.peerID).status = 1
 
 				self.emit('peer_connected')
 
@@ -80,13 +91,12 @@ class Swarm extends EventEmitter {
 
 			'disconnected' : ( peer ) => {
 
-				console.log("deleting", peer.peerID)
+				self.peers.delete(peer)
 
-				if(self.peers.has(peer))
-					self.peers.delete(peer)
-
-				if(self.peerStats.has(peer.peerID))
-					self.peerStats.get(peer.peerID).disconnects++
+				//if(self.peerStats.has(peer.peerID)) {
+				self.peerStats.get(peer.peerID).disconnects++
+				self.peerStats.get(peer.peerID).status = 0
+				//}
 
 				self.emit('peer_disconnected')
 
@@ -122,48 +132,101 @@ class Swarm extends EventEmitter {
 
 			},
  
-			'peer_piece' : (peer, index, begin, piecelet) => { 
-			
-				let stats = self.peerStats.get(peer.peerID)
-				console.log(peer.uploadBytes)
-				stats.uploadTime = peer.uploadTime
-				stats.uploadBytes = peer.uploadBytes
-
-			},
-
-			'piece_sent' : ( peer ) => {
-
-				let stats = self.peerStats.get(peer.peerID)
-				stats.downloadTime = peer.downloadTime//+= uploadTime
-				stats.downloadBytes = peer.downloadBytes //+= piecelet.length
-
-			}
-
 		}
 
 		var sockOpts = {'allowHalfOpen' : false, 'pauseOnConnect' : true}
 
 		//this.UTPserver = uTP.createServer() // ...
-		//let self = this
 
-		this.TCPserver = net.
-		createServer(sockOpts, ( sock ) => {
+		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 			
 			console.log("server connection", sock.remoteAddress, sock.remotePort)
-			let peer = this.makePeer(sock)
-			
-			peer.on('connected', (peer) => {
+			self.pruneConnections(true)
 
-				self.emit('new_peer', peer)
+			if(self.peers.size < 50 || self.amUnchokedPeers.size < 15 || self.aInterestedPeers < 25) {
+				
+				let peer = self.makePeer(sock)
+				peer.on('connected', (peer) => { self.emit('new_peer', peer) })
 
-			})
+			}
 
 		}).listen(this.myPort)
 
 		this.on('new_peer', (peer) => {
-			//if(!self.peers.has(peer))
+
 			self.peers.add(peer)
+
 		})
+
+	}
+
+	start(seeding) {
+
+		this.seeding = seeding
+		this.connLoop = setInterval( (this.connectionManager).bind(this), 60 * 1e3 )
+
+	}
+
+	//called periodically and also when new peers available
+	pruneConnections(avail) { //prunes idle or bad peers - peers that never unchoke despite interest - slow peers 
+
+		let self = this, seeding = this.seeding
+
+		if(avail && this.peers.size > 50) { //be liberal
+
+			this.peers.forEach( peer => {
+
+				let stats = self.peerStats.get(peer.peerID)
+				let time = Date.now - stats.firstConnect
+
+				if(!seeding && time > 30 * 1e3  && stats.upRate < 1e3) //prune by percentile ?? 
+					peer.sock.end()
+				if(seeding && time > 30 * 1e3 && stats.downRate < 1e3) 
+					peer.sock.end()
+
+			})
+			
+
+		} else { //be more conservative
+
+
+		}
+
+	}
+
+	connectionManager() {
+
+		let self = this
+
+		var _addPeer = async function (addr, callback) {
+
+			try {
+
+				let peer = await self.connectPeer(addr)
+				self.peers.add(peer)
+
+			} catch (error) {
+
+			//	console.log(error)
+
+			}
+
+			callback()
+		
+		}
+
+		this.pruneConnections(true)
+
+		if(this.peers.size < 50 || this.amUnchokedPeers.size < 15 || this.aInterestedPeers < 25) {
+
+			let numAddrs = Math.max(50 - this.peers.size, 15 - this.amUnchokedPeers.size, 25 - this.aInterestedPeers.size)
+			let addrs = this.peerStats.filter( stat => stat.online == 1 && stat.status == 0 ) //new peers not currently connected
+			//console.log(addrs)
+			addrs = addrs.getArray().slice(0, numAddrs)
+		//	console.log(addrs)
+			async.each(addrs, _addPeer, (err) => { self.emit('new_peers') })
+
+		}
 
 	}
 
@@ -193,35 +256,37 @@ class Swarm extends EventEmitter {
 
 
 	checkPeerID(peerID) { //maybe keep registry of peerIDs and addresses ?
-		console.log('every:', Array.from(this.peers).every( peer => peer.peerID != peerID) )
-		console.log('my ip', peerID != this.download.peerID)
+
 		return Array.from(this.peers).every( peer => peer.peerID != peerID) && peerID != this.download.peerID
 
 	}
 
 	connectPeer (addr) {
 		
+		let self = this
 		return new Promise((resolve, reject) => {
 
 			let peer = this.makePeer(null, addr).handshake()
 		
-			let timeout = setTimeout(()=> {
+			peer.timeout = setTimeout(()=> {
 
-				reject("peer timeout")
+				let stat = self.peerStats.get(addr.host + ":" + addr.port)
+				stat.online = 0
+				self.peerStats.set(addr.host + ":" + addr.port, stat)
+				reject(new Error("peer timeout"))
 
 			}, this.defaultTimeout)
 
 			peer.on('connected', (peer) => { //after recieving handshake
 
-				clearTimeout(timeout)
-				console.log('resolve peer', peer.peerID)
+				clearTimeout(peer.timeout)
 				resolve(peer)
 
 			})
 
 			peer.on('reject id', (peer) => {
 
-				clearTimeout(timeout)
+				clearTimeout(peer.timeout)
 				reject(new Error('rejected id'))
 
 			})
@@ -230,30 +295,17 @@ class Swarm extends EventEmitter {
 	}
 
 	addPeers (addrs) {
-		console.log('addpeer')
-		let self = this
-		var _addPeer = async function (addr, callback) {
 
-			try {
-
-				let peer = await self.connectPeer(addr)
-				self.peers.add(peer)
-
-			} catch (error) {
-
-				console.log(error)
-
-			}
-
-			callback()
+		addrs = addrs.filter(addrs => Array.from(this.peers).every(oPeer => oPeer.port != addrs.port && oPeer.host != addrs.host))
+		
+		for(var addr of addrs) {
 			
+			if( !this.peerStats.has(addr.host + ":" + addr.port) )
+				this.peerStats.set(addr.host + ":" + addr.port, { disconnects : null, host : addr.host, port : addr.port, online : 1 , status : 0})
+
 		}
 
-		async.each(addrs, _addPeer, function (err) {
-
-			self.emit('new_peers')
-
-		})
+		this.connectionManager()
 
 	}
 
@@ -274,7 +326,6 @@ class Swarm extends EventEmitter {
 	//set of peers that have index piece
 	peersWithPiece(index, peers) {
 
-		//peers = peers || this.peers
 		return peers.filter( peer => peer.pieces.has(index))
 
 	}
@@ -303,25 +354,25 @@ class Swarm extends EventEmitter {
 
 	get leechers() {
 
-		return this.peers.filter(peer => !peer.isSeeder())//.getSet()
+		return this.peers.filter(peer => !peer.isSeeder())
 
 	}
 
 	get seeders() {
 
-		return this.peers.filter( peer => peer.isSeeder())//.getSet()
+		return this.peers.filter( peer => peer.isSeeder())
 
 	}
 
 	get optimisticUnchokePeers () {
 
-		return this.peers.filter( peer => peer.optUnchoke )//.getSet()
+		return this.peers.filter( peer => peer.optUnchoke )
 
 	}
 
 	get unchokedPeers () {
 
-		return this.peers.filter( peer => !peer.choked)//.getSet()
+		return this.peers.filter( peer => !peer.choked)
 
 	}
 
@@ -333,7 +384,7 @@ class Swarm extends EventEmitter {
 
 	get amUnchokedPeers () {
 
-		return this.peers.filter( peer => !peer.pChoked)//.getSet()
+		return this.peers.filter( peer => !peer.pChoked)
 
 	}
 
@@ -345,13 +396,13 @@ class Swarm extends EventEmitter {
 
 	get interestedPeers () {
 
-		return this.peers.filter( peer => peer.interested)//.getSet()
+		return this.peers.filter( peer => peer.interested)
 
 	}
 
 	get aInterestedPeers () {
 
-		return this.peers.filter(peer => peer.aInterested)//.getSet()
+		return this.peers.filter(peer => peer.aInterested)
 
 	}
 
@@ -363,7 +414,7 @@ class Swarm extends EventEmitter {
 	 
 	get amInterestedPeers () {
 
-		return this.peers.filter( peer => peer.pInterested)//.getSet()
+		return this.peers.filter( peer => peer.pInterested)
 
 	}
 
@@ -413,7 +464,6 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 		'peerID' : this.peerID, //kill
 		'activePieces' : this.activePieces, //kill
 		'pieces' : this.pieces, //pieces this peer has //kill
-		//////////////////////////////////////////////////////////////////////
 		'announceUrlList' : [], 
 		'date' : "", 
 		'infoHash' : null,
@@ -473,9 +523,9 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 		self.requests = this.requests.filter( req => req.index != index && req.begin != begin && req.length != piecelet.length)
 
-		if(piece.isComplete && piece.assemble()) { //copy to disk		
+		if(piece.isComplete && piece.assemble()) {
 			
-			console.log(Math.floor(self.pieces.size / self.fileMetaData.numPieces * 100), '% | Got piece:', index)
+		//	console.log(Math.floor(self.pieces.size / self.fileMetaData.numPieces * 100), '% | Got piece:', index, "|" ,peer.peerID)
 			self.activePieces.delete(index)
 			self.pieces.set(index, new self.Piece(index))
 			self.swarm.havePiece(index)
@@ -486,7 +536,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 				return	
 			} 
 
-			self.emit('recieved_piece') //call downloadPiece before downloadPiecelet
+			self.emit('recieved_piece') 
 
 		} 
 
@@ -508,15 +558,11 @@ Downloader.prototype.setMetaInfoFile = async function (metaInfoFilePath) {
 	let {announce, info} = deMetaData
 
 	let announceList = deMetaData['announce-list']
-	//console.log(announceList)
 	this.trackerless = ! (announceList || announce)
 	
 	if(!this.trackerless) {
 		this.fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
-
-		//console.log(announceList.map( url => url[0].toString()) )
 		this.fileMetaData.announceUrlList = this.fileMetaData.announceUrlList.concat( announceList.map( url => url[0].toString()) )
-		//console.log(this.fileMetaData.announceUrlList)
 	}
 	
 	return await this.setMetaInfo(benEncode(info))
@@ -691,20 +737,20 @@ Downloader.prototype.seedLoop = function() {
 		let unchokeCandidates = Array.from(interestedPeers).sort( (p1, p2) => {
 
 			let p1Stats = peerMap.get(p1.peerID), p2Stats = peerMap.get(p2.peerID)
-			return (p1Stats.downloadBytes / p1Stats.downloadBytes) < (p2Stats.downloadBytes / p2Stats.downloadBytes)
+			return p1Stats.upRate - p2Stats.upRate
 
 		})
-		//console.log("unchokeCandidates:", unchokeCandidates)
+
 		for(let numUnchoked = 0; numUnchoked < 12 && unchokeCandidates.length > 0; numUnchoked++) { //maybe add randomness ??
 
 			candidate = unchokeCandidates.shift()
-			//console.log("Unchoking:", candidate)
-			if(candidate.choked) //if already unchoked do nothing
+
+			if(candidate.choked)
 				candidate.unchoke()
 
 		}
-		let self = this
 
+		let self = this
 		unchokeCandidates.filter(peer => !peer.choked).forEach( peer => peer.choke())
 
 }
@@ -724,8 +770,7 @@ Downloader.prototype.optUnchokeLoop = function() {
 
 		swarm.optimisticUnchokePeers.forEach( peer => peer.choke() )
 	
-		let unchokeCandidates = Array.from(interestedAndChoked).sort( (p1, p2) => (peerMap.get(p1.peerID).firstConnect) < (peerMap.get(p2.peerID).firstConnect ) )
-		//!!!!!!!!! should favor new peers !!!!!!!!!!!
+		let unchokeCandidates = Array.from(interestedAndChoked).sort( (p1, p2) => (peerMap.get(p2.peerID).firstConnect) - (peerMap.get(p1.peerID).firstConnect ) )
 		
 		for(let numUnchoked = 0; numUnchoked < 3 && unchokeCandidates.length > 0; numUnchoked++) { //maybe add randomness ??
 
@@ -758,7 +803,7 @@ Downloader.prototype.unchokeLoop = function() {
 
 		let p1Stats = peerMap.get(p1.peerID), p2Stats = peerMap.get(p2.peerID)
 
-		return (p1Stats.uploadBytes/p1Stats.uploadTime) < (p2Stats.uploadBytes/ p2Stats.uploadTime)
+		return p1Stats.downRate - p2Stats.downRate
 
 	})
 
@@ -790,8 +835,6 @@ Downloader.prototype.unchokeLoop = function() {
 //piece downloader - only called when pieces available
 Downloader.prototype.downloadPieces = function() {
 
-	//console.log('downloadPieces')
-
 	var maxActivePieces = () => {
 		
 		let left = this.fileMetaData.numPieces - this.pieces.size 
@@ -801,9 +844,7 @@ Downloader.prototype.downloadPieces = function() {
 
 	//call on no activePieces, leeching and connected to ->interested amUnchoked peers
 
-	//actually interested, amUnchoked peers
 	peers = this.swarm.amUnchokedPeers.intersection(this.swarm.aInterestedPeers) //amInterestedPeers
-	//delete activePieces that no peer has 
 
 	if( !(this.activePieces.size < maxActivePieces()))
 		return this.downloadPiecelets()
@@ -813,7 +854,7 @@ Downloader.prototype.downloadPieces = function() {
 		peers = this.swarm.aInterestedPeers
 
 	/////////////////
-	hist = this.swarm.piecesByFreq2(peers)
+	hist = this.swarm.piecesByFreq2(peers).map( tuple => tuple[0] )
 	hist = hist.filter( x => x || (x == 0) && true )
 	hist = hist.filter(x => x < this.fileMetaData.numPieces)
 	this.bar = hist
@@ -897,8 +938,7 @@ Downloader.prototype.downloadPiecelets = function() {
 
 	}).bind(this)
 
-	//always interested in these peers
-	while(this.requests.length < peers.size * 4 && peers.size > 0 && this.activePieces.size > 0 ) {//  && i++ < 2000) {
+	while(this.requests.length < peers.size * 4 && peers.size > 0 && this.activePieces.size > 0 ) {
 
 		//randomly select peer - more heavily weight idle peers
 		let rand = Math.random()
@@ -906,16 +946,14 @@ Downloader.prototype.downloadPiecelets = function() {
 
 		for(var i = 0 ; i < 4; i++) {
 
-			if(!randReqToPeer(randPeer) ) {//no more piecelets
+			if(!randReqToPeer(randPeer) ) { //no more piecelets
 
-				peers.delete(randPeer) //just delete or remove
+				peers.delete(randPeer) 
 				break
 
 			}
 		}
 	}
-
-	//enough outstanding requests or no piecelets for active pieces ...
 
 }
 
@@ -936,23 +974,18 @@ Downloader.prototype.pruneConn = function() {
 
 Downloader.prototype.addPeers = function(peers) {
 
-	//if(this.seeding)
-	//	return
+	if(this.seeding)
+		return
 
 	peers = peers.map( (tuple) => { return { host : tuple.ip, port : tuple.port } } )
+	//add all peers to pool - only connect to ~50
 	//apply filters
 
-	if(!peers)
-		return
-	peers = peers.filter(peer => Array.from(this.swarm.peers).every(oPeer => oPeer.port != peer.port && oPeer.host != peer.host))
 	
 	console.log('Connecting:', peers)
 
-	let self = this
-	
 	this.swarm.addPeers(peers)
-
-	this.pruneConn()
+	//this.pruneConn()
 
 }
 
@@ -1001,7 +1034,6 @@ Downloader.prototype.announce = async function() {
 			console.log("leechers:", numLeechers)
 			console.log('seeders:', numSeeders)
 			console.log('peers returned:', peerList)
-			//callback(null, )
 
 		} catch(error) {
 
@@ -1023,7 +1055,11 @@ class Client {
 		this.downloadeders = []
 	}
 
-	addTorrent() {
+	addTorrent(str) {
+
+		//check uri or filepath
+		//if invalid uri or file throw error
+		//if neighter ...
 
 		let downloader = new Downloader()
 
