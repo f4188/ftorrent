@@ -28,7 +28,7 @@ var Pieces = (file) => class Piece {
 
 		this.hash = file.pieceHashes[index]
 
-		this.path = file.path //path to file on disk
+		this.path = file.path
 		this.pathList = file.pathList
 		this.fileLengthList = file.fileLengthList
 
@@ -49,10 +49,7 @@ var Pieces = (file) => class Piece {
 	async readPiecelet(begin, length) {
 
 		let start = this.index * this.normalPieceLength + begin, end = start + length
-
-		let chunks
-
-		let leftBound = 0, fileBounds = []
+		let chunks, leftBound = 0, fileBounds = []
 
 		for(var i = 0 ; i <this.fileLengthList.length; i++) {
 

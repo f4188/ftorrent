@@ -4,7 +4,6 @@ const benEncode = require('bencode').encode
 const async = require('async')
 const speedometer = require('speedometer')
 EventEmitter = require('events').EventEmitter
-//memwatch = require('memwatch')
 
 const NSet = require('../lib/NSet.js').NSet
 const NMap = require('../lib/NSet.js').NMap
@@ -27,8 +26,7 @@ var byFreq2 = ( arrSet ) => {
 
 	let freqs = new Map()
 
-	for(var set of arrSet) {
-
+	for(var set of arrSet) 
 		for(var pIdx of set) {
 
 			let count = freqs.get(pIdx)
@@ -38,10 +36,8 @@ var byFreq2 = ( arrSet ) => {
 				freqs.set(pIdx, 0) 
 
 		}
-	}
 
 	return Array.from(freqs.entries()).sort( (p1, p2) => p1[1] - p2[1])//.map( tuple => tuple[0] )
-
 }
 
 class Swarm extends EventEmitter {
@@ -62,17 +58,21 @@ class Swarm extends EventEmitter {
 		this.myIP = myIP
 		this.myPort = myPort
 
+		this.startTime = null
+
 		let self = this
 
 		this.listeners = {
 
 			'connected' : ( peer ) => {
 
+				self.peers.add(peer)
+
 				if(!self.peerStats.has(peer.peerID)) {
 
-					let stats =  { 'disconnects' : 0, 'firstConnect' : Date.now(), 'host' : peer.sock.remoteAddress, 
-						'port' : peer.sock.remotePort, 'status' : 1, 'online' : 1, dSpeed : speedometer(60), 
-						downRate : 0, uSpeed : speedometer(60), upRate : 0 , pruned : 0 }
+					let stats =  { 'disconnects' : 0, 'firstConnect' : Date.now(), host : peer.sock.remoteAddress, 
+						port : peer.sock.remotePort, status : 1, online : 1, dSpeed : speedometer(60), 
+						downRate : 0, uSpeed : speedometer(60), upRate : 0 }
 
 					self.peerStats.set(peer.peerID, stats)
 					self.peerStats.set(stats.host + ":" + stats.port, stats)
@@ -85,28 +85,19 @@ class Swarm extends EventEmitter {
 				else 
 					self.peerStats.get(peer.peerID).status = 1
 
-				self.emit('peer_connected')
+				self.emit('new_peer', peer)
+
 
 			},
 
 			'disconnected' : ( peer ) => {
 
 				self.peers.delete(peer)
-
-				//if(self.peerStats.has(peer.peerID)) {
 				self.peerStats.get(peer.peerID).disconnects++
 				self.peerStats.get(peer.peerID).status = 0
-				//}
-
 				self.emit('peer_disconnected')
 
 			}, 
-
-			'new_peers' : () => { 
-
-				self.emit('new_peers') 
-
-			},
 
 			'peer_interested' : () => {
 
@@ -143,58 +134,60 @@ class Swarm extends EventEmitter {
 			console.log("server connection", sock.remoteAddress, sock.remotePort)
 			self.pruneConnections(true)
 
-			if(self.peers.size < 50 || self.amUnchokedPeers.size < 15 || self.aInterestedPeers < 25) {
-				
+			if(self.connectMorePeersCond)
 				let peer = self.makePeer(sock)
-				peer.on('connected', (peer) => { self.emit('new_peer', peer) })
-
-			}
 
 		}).listen(this.myPort)
-
-		this.on('new_peer', (peer) => {
-
-			self.peers.add(peer)
-
-		})
 
 	}
 
 	start(seeding) {
 
 		this.seeding = seeding
-		this.connLoop = setInterval( (this.connectionManager).bind(this), 60 * 1e3 )
+		this.connLoop = setInterval( (this.connectManager).bind(this), 60 * 1e3 )
 
 	}
+
+	//disconnect peers that are seeding if seeding
+	//disconnect peers that refuse requests
+	//disconnect peers that never unchoke even when interested (in me)
+
+	//get connections under limit by randomly disconnecting slow peers or infrequent or short time unchokers (1)
+	//peer leeching but mutually uninterested
+
+	//average total bandwidth available
+	// Z peeri * upload speed < average total bandwidth
+	//randomly disconnect one at a time from(1) and monitor download speed - stop when download speed decreases
 
 	//called periodically and also when new peers available
 	pruneConnections(avail) { //prunes idle or bad peers - peers that never unchoke despite interest - slow peers 
 
 		let self = this, seeding = this.seeding
 
-		if(avail && this.peers.size > 50) { //be liberal
+		//average rate to top five downloaders 
+		if(avail || (this.peers.size > 50  )) { //be liberal 
+
+			let fiveRate = this.peerStats.filter(x => x.status == 1).getArray().map( x => x.downRate ).sort( (s1, s2) => s2 - s1 ).slice(0, 10)
+			fiveRate = fiveRate.reduce( (sum, rate) => sum + rate, 0) / 10
 
 			this.peers.forEach( peer => {
 
 				let stats = self.peerStats.get(peer.peerID)
 				let time = Date.now - stats.firstConnect
 
-				if(!seeding && time > 30 * 1e3  && stats.upRate < 1e3) //prune by percentile ?? 
+				if(!seeding && time > 60 * 1e3  && stats.downRate < fiveRate / 5 ) //prune by percentile ?? 
 					peer.sock.end()
-				if(seeding && time > 30 * 1e3 && stats.downRate < 1e3) 
+				if(seeding && time > 60 * 1e3 && stats.upRate < 1e3) 
 					peer.sock.end()
 
 			})
 			
 
-		} else { //be more conservative
-
-
 		}
 
 	}
 
-	connectionManager() {
+	connectManager(starting) {
 
 		let self = this
 
@@ -207,8 +200,6 @@ class Swarm extends EventEmitter {
 
 			} catch (error) {
 
-			//	console.log(error)
-
 			}
 
 			callback()
@@ -217,17 +208,25 @@ class Swarm extends EventEmitter {
 
 		this.pruneConnections(true)
 
-		if(this.peers.size < 50 || this.amUnchokedPeers.size < 15 || this.aInterestedPeers < 25) {
+		if(this.connectMorePeersCond) {
 
 			let numAddrs = Math.max(50 - this.peers.size, 15 - this.amUnchokedPeers.size, 25 - this.aInterestedPeers.size)
-			let addrs = this.peerStats.filter( stat => stat.online == 1 && stat.status == 0 ) //new peers not currently connected
-			//console.log(addrs)
-			addrs = addrs.getArray().slice(0, numAddrs)
-		//	console.log(addrs)
+			if(starting) 
+				numAddrs = 200
+
+			let addrs = this.peerStats.filter( stat => stat.online == 1 && stat.status == 0 && stat.disconnects == null).getArray() //new peers not currently connected
+			addrs = Array.from(new NSet(addrs)) //remove duplicates (each stat keyed twice, by ip and peerID)
+			addrs = addrs.slice(0, numAddrs)
 			async.each(addrs, _addPeer, (err) => { self.emit('new_peers') })
 
 		}
 
+	}
+
+	connectMorePeersCond () {
+
+		return this.peers.size < 50 || this.amUnchokedPeers.size < 15 || this.aInterestedPeers < 25
+	
 	}
 
 	makePeer(sock, addr) {
@@ -271,8 +270,8 @@ class Swarm extends EventEmitter {
 			peer.timeout = setTimeout(()=> {
 
 				let stat = self.peerStats.get(addr.host + ":" + addr.port)
-				stat.online = 0
-				self.peerStats.set(addr.host + ":" + addr.port, stat)
+				if(stat) stat.online = 0
+				//self.peerStats.set(addr.host + ":" + addr.port, stat)
 				reject(new Error("peer timeout"))
 
 			}, this.defaultTimeout)
@@ -305,7 +304,7 @@ class Swarm extends EventEmitter {
 
 		}
 
-		this.connectionManager()
+		this.connectManager()
 
 	}
 
@@ -645,6 +644,7 @@ Downloader.prototype.start = async function() {
 	//magnet:?xt=urn:btih:9401adf4f356feb3c629b3757f6d71430052fc8c&dn=c_primer_5th_edition.pdf
 	//dont start until metaData filled - pieces checked
 	console.log('Starting...')
+	this.swarm.startTime = Date.now()
 
 	if (this.seeding)
 		this.seed()
@@ -938,37 +938,39 @@ Downloader.prototype.downloadPiecelets = function() {
 
 	}).bind(this)
 
+	var repeat = (elem, num, arr) => {
+
+		while(num-- > 0)
+			arr.push(elem)
+
+	}
+
+	// all zeros
+	//let arr = Array.from(peers)
+	//let rates = arr.map( peer => this.swarm.peerStats.get(peer.peerID).downRate )
+	//let total = rates.reduce( (sum, rate) => sum + rate )
+	//let numReq = this.activePieces.getArray().map( piece => piece.requests.length ).reduce( (sum, len) => sum + len, 0 )
+	//let minRate = Math.min(...rates)
+
+	let peersWithOutstandingReq = new NSet(this.requests.map( req => req.peer ))
+	peers = peers.difference(peersWithOutstandingReq)
+
+
 	while(this.requests.length < peers.size * 4 && peers.size > 0 && this.activePieces.size > 0 ) {
 
 		//randomly select peer - more heavily weight idle peers
 		let rand = Math.random()
 		let randPeer = Array.from(peers)[Math.floor(rand) * peers.size]	
 
-		for(var i = 0 ; i < 4; i++) {
+		//for(var i = 0 ; i < 4; i++) {
+		if(!randReqToPeer(randPeer) ) { //no more piecelets
 
-			if(!randReqToPeer(randPeer) ) { //no more piecelets
+			peers.delete(randPeer) 
+			break
 
-				peers.delete(randPeer) 
-				break
-
-			}
 		}
+		//}
 	}
-
-}
-
-Downloader.prototype.pruneConn = function() {
-
-	//disconnect peers that are seeding if seeding
-	//disconnect peers that refuse requests
-	//disconnect peers that never unchoke even when interested (in me)
-
-	//get connections under limit by randomly disconnecting slow peers or infrequent or short time unchokers (1)
-	//peer leeching but mutually uninterested
-
-	//average total bandwidth available
-	// Z peeri * upload speed < average total bandwidth
-	//randomly disconnect one at a time from(1) and monitor download speed - stop when download speed decreases
 
 }
 
@@ -978,14 +980,8 @@ Downloader.prototype.addPeers = function(peers) {
 		return
 
 	peers = peers.map( (tuple) => { return { host : tuple.ip, port : tuple.port } } )
-	//add all peers to pool - only connect to ~50
-	//apply filters
-
-	
-	console.log('Connecting:', peers)
 
 	this.swarm.addPeers(peers)
-	//this.pruneConn()
 
 }
 
@@ -1003,11 +999,8 @@ Downloader.prototype.announce = async function() {
 	
 	let infoHash = this.fileMetaData.infoHash
 	let peerID = this.peerID
-
-	//let sock = await getUDPSocket() 
 	
 	var _annnounce = (async function (announceUrl, callback) {
-
 		
 		let u = new url.URL(announceUrl)
 		let resp, tracker = this.trackers[u.href]
@@ -1033,7 +1026,7 @@ Downloader.prototype.announce = async function() {
 			console.log("Tracker:", announceUrl)
 			console.log("leechers:", numLeechers)
 			console.log('seeders:', numSeeders)
-			console.log('peers returned:', peerList)
+			console.log('peers returned:', peerList && peerList.length)
 
 		} catch(error) {
 
@@ -1046,7 +1039,6 @@ Downloader.prototype.announce = async function() {
 	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err, callback) {})
 
 }
-
 
 class Client {
 

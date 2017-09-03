@@ -3,7 +3,6 @@ Duplex = require('stream').Duplex
 Transform = require('stream').Transform
 benDecode = require('bencode').decode 
 benEncode = require('bencode').encode
-speedometer = require('speedometer')
 PassThrough = require('stream').PassThrough
 
 const HANDSHAKE_LENGTH = 1 + 19 + 8 + 20 + 20 
@@ -56,6 +55,9 @@ function Peer(fileMetaData, download, sock, checkID) {
 
 	let self = this
 
+	this.keepA = null
+	this.on('connected', () => { self.keepA = setInterval( (self.keepAlive).bind(self) , 60 * 1e3) })
+
 	var _handleDisconnect = () => {
 
 		if(self.state == self.STATES.connected)
@@ -96,7 +98,6 @@ Peer.prototype.piece = function(index, begin, piece) {
 	let p = new PassThrough() //set highwatermark
 	this.pRequest.p = p
 	p.pipe(this.sock, {'end' : false, 'highWaterMark' : 2 ** 15})
-	//this.sendPieceStart = Date.now()
 
 	let self = this
 
@@ -126,9 +127,8 @@ Peer.prototype._finishRequest = function() {
 
 Peer.prototype.addListeners = function(listeners) {
 
-	for( var event in listeners) {
+	for( var event in listeners) 
 		this.on(event, listeners[event])
-	}
 	
 }
 
@@ -264,12 +264,6 @@ Peer.prototype._fulfillRequest = function() { //expects pRequest to be null and 
 }
 
 Peer.prototype._pPiece = function (index, begin, piece) {//, uploadTime) {
-
-	//if(this.pChoked) 
-	//	return 
-
-	//this.uploadBytes += piece.length
-	//this.uploadTime += uploadTime
 
 	this.emit('peer_piece', this, index, begin, piece)
 
@@ -509,10 +503,7 @@ class BitTorrentMsgParser extends Transform {
 		this.file = file
 		this.msgBuffer = Buffer.alloc(0);
 		this.nextMsgLength = HANDSHAKE_LENGTH;
-		this.nextMsgParser = this.parseHandshake //initially
-	//	this.recievingPiece = false
-	//	this.recvPieceStart = null
-	//	this.uploadTime = null
+		this.nextMsgParser = this.parseHandshake
 
 	}
 

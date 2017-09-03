@@ -142,29 +142,6 @@ class DHT {
 
 	}
 
-	/*forceRefreshBuckets() {
-
-		this.buckets.forEach( bucket => {
-
-			let rand = Math.floor(Math.random() * bucket.nodeIDs.length)
-			let node 
-
-			if(bucket.nodeIDs.length == 0) {
-				let min = bucket.min
-				let max = bucket.max
-				let randIDNum = min + Math.random() * (max - min)
-				let randID = randIDNum.toString(16)
-				node = Buffer.from(randID, 'hex')
-			} else {
-				node = bucket.nodeIDs[rand]
-			}
-
-			this.findNodeIter(node).catch( err => console.log("Refresh:", err))	
-
-		})
-
-	}*/
-
 	refreshBuckets(force) {
 
 		this.buckets.forEach( bucket => {
@@ -175,7 +152,6 @@ class DHT {
 
 				let rand = Math.floor(Math.random() * bucket.nodeIDs.length)
 				let node 
-				//let allBad = bucket.nodeIDs.every( id => map.get(id).state == NODE_STATE.BAD )
 
 				if(bucket.nodeIDs.length == 0) {
 
@@ -298,7 +274,7 @@ class DHT {
 
 	}
 
-	//returns [peers] and inserts this peer into mainline DHT
+	//returns [peers] and inserts this peer into DHT
 	async announce(infoHash, port) {
 
 		let [peers, nodes] = await this.getPeersIter(infoHash)
@@ -315,7 +291,6 @@ class DHT {
 		return new Promise( (resolve, reject) => {
 
 			let [[node], nodes] = this.findNode(nodeID)
-
 			let allNodes = new NSet(nodes), queriedNodes = new NSet()
 			let kClosest = nodes, kClosestCount = 0
 			let pQueue
@@ -333,8 +308,8 @@ class DHT {
 				kClosest = closestSoFar
 				
 				if(LOG) {
-					console.log("myNodeID:", myNodeID, kClosestCount)
-					console.log("kClosest:", kClosest )
+					console.log("nodeID:", nodeID, kClosestCount)
+					console.log("kClosest:", kClosest.map( x => x.slice(0, 6) ) )
 				}
 
 				if(kClosestCount >= 8)
@@ -361,6 +336,7 @@ class DHT {
 				} 
 	
 				queriedNodes.add(task.id)
+				console.log("query:", task.id)
 
 				try {
 
@@ -399,7 +375,6 @@ class DHT {
 		return new Promise( (resolve, reject) => {
 
 			let [peers, nodes] = this.getPeers(nodeID)
-
 			let allNodes = new NSet(nodes), queriedNodes = new NSet(), kClosest = nodes, kClosestCount = 0
 			let pQueue, map = this.nodes, myNodeID = this.myNodeID
 			let allPeers = peers ? peers : []
@@ -415,8 +390,7 @@ class DHT {
 				kClosest = closestSoFar
 				
 				if(LOG) {
-					console.log("myNodeID:", myNodeID, kClosestCount)
-					console.log("kClosest:", kClosest )
+					console.log("nodeID:", nodeID.slice(0,10), kClosestCount , "kClosest:", kClosest.map( x => x.slice(0, 8) ).join(" | "))
 				}
 
 				if(peers) {
@@ -449,6 +423,8 @@ class DHT {
 					return
 				}
 				
+				console.log('query:', task.id)
+
 				try {
 
 					let [peers, result] = await map.get(task.id).getPeers(nodeID)
@@ -532,15 +508,16 @@ class DHT {
 		let node = this._getNode(nodeID)
 		let bucket = this._findBucketFits(nodeID)
 
-		if( bucket.isFull() && bucket.nodeIDs.every( id => this._getNode(id).state == NODE_STATE.GOOD )) {
-
+		if( bucket.contains(nodeID))
 			return
 
-		} else if(!bucket.isFull()) { 
+		if( bucket.isFull() && bucket.nodeIDs.every( id => this._getNode(id).state == NODE_STATE.GOOD ))
+			return
 
+		else if(!bucket.isFull())
 			bucket.insert(nodeID)
 
-		} else if(bucket.has(this.myNodeID)) {
+	 	else if(bucket.has(this.myNodeID)) {
 			
 			bucket.insert(nodeID)
 			this.buckets.pop()
@@ -722,7 +699,7 @@ class DHT {
 		let token = request.a.token
 
 		if(!this.isTokenValid(token, host))
-			return {'t': request.t, 'y': 'e', 'e': [203,"Bad Token"]} 
+			return {'t': request.t, 'y': 'e', 'e': [203, "Bad Token"]} 
 
 		let port = request.a.implied_port != 0 ? impliedPort : request.a.port
 
@@ -812,10 +789,12 @@ class Bucket {
 		let b2 = new Bucket(this.min + (this.max - this.min)/2, this.max)
 
 		this.nodeIDs.forEach(nodeID => {
+
 			if(b1.fits(nodeID))
 				b1.insert(nodeID)
 			else 
 				b2.insert(nodeID)
+
 		})
 
 		return [b1,b2]
@@ -881,12 +860,14 @@ class Node {
 	parsePeerContactInfos(compactInfos, nodeID) {
 
 		var slicer = (buf) => {
+
 			let slices = []
 			while(buf.length > 0) {
 				slices.push(buf.slice(0, 6))
 				buf = buf.slice(6)
 			}
 			return slices
+
 		}
 
 		return compactInfos.map(info => {
@@ -1019,6 +1000,7 @@ class Node {
 		
 			if(response.r && response.r.nodes)
 				nodes = this.parseNodeContactInfos(response.r.nodes)
+
 			if(response.r.values)
 				peers = this.parsePeerContactInfos(response.r.values, response.r.id)
 
