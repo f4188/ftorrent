@@ -135,7 +135,7 @@ class Swarm extends EventEmitter {
 			self.pruneConnections(true)
 
 			if(self.connectMorePeersCond)
-				let peer = self.makePeer(sock)
+				self.makePeer(sock)
 
 		}).listen(this.myPort)
 
@@ -454,7 +454,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 	
 	this.requests = []
 
-	this.activePieces = new Map()
+	this.activePieces = new NMap()
 	this.pieces = new Map()
 	this.seeding = false
 
@@ -516,11 +516,13 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 		let piece = self.activePieces.get(index)
 		piece.add(index, begin, piecelet)
 
-		let pos = self.requests.findIndex( req => req.index == index && req.begin == begin && req.length == piecelet.length )
-		if(pos != -1)
-			 clearTimeout(self.requests[pos].timeout)
+		//let pos = self.requests.findIndex( req => req.index == index && req.begin == begin && req.length == piecelet.length )
+		//if(pos != -1)
+		//	 clearTimeout(self.requests[pos].timeout)
 
-		self.requests = this.requests.filter( req => req.index != index && req.begin != begin && req.length != piecelet.length)
+		//self.requests.splice(pos, 1)
+		//this.requests.filter( req => req.index == index && req.begin == begin && req.length == piecelet.length).map( req => clearTimeout(req.timeout) )
+		//self.requests = this.requests.filter( req => req.index != index && req.begin != begin && req.length != piecelet.length)
 
 		if(piece.isComplete && piece.assemble()) {
 			
@@ -702,7 +704,7 @@ Downloader.prototype.leech = function() {
 Downloader.prototype.seed = function () {
 
 	clearInterval(this.uLoop)
-	//clear listeners ??
+	//disconnect seeders
 
 	this.announceLoop()
 	this.annLoop = setInterval((this.announceLoop).bind(this), 300 * 1e3) 
@@ -838,7 +840,7 @@ Downloader.prototype.downloadPieces = function() {
 	var maxActivePieces = () => {
 		
 		let left = this.fileMetaData.numPieces - this.pieces.size 
-		return left >= 10 ? 10 : left
+		return left >= 50 ? 50 : left
 
 	}
 
@@ -882,30 +884,39 @@ Downloader.prototype.downloadPiecelets = function() {
 
 	let swarm = this.swarm, requests = this.requests, peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
 
-	this.requests.filter( request => request.peer.pChoked ).forEach( req => { clearTimeout(req.timeout); req.putBack(req) } )
-	this.requests = this.requests.filter( request => !request.peer.pChoked )
+	//this.requests.filter( request => request.peer.pChoked ).forEach( req => { clearTimeout(req.timeout); req.putBack(req) } )
+	//this.requests = this.requests.filter( request => !request.peer.pChoked )
+
+	/*this.activePieces.forEach( piece => piece.dispRequests.forEach( dReq => {
+		if (dReq.peer.pChoked) {
+			clearTimeout(req.timeout);
+			req.putBack()
+		}
+	}))*/
 
 	if(peers.size == 0) 
 		return
 
 	let self = this
 
-	var reqToPeer = (( peer, req ) => {
+	/*var reqToPeer = ( ( peer, req, piece ) => {
 
-		req.timeout = setTimeout(()=> {
+		//let timeoutTime = Math.max(this.swarm.peerStats.get(peer.peerID).downRate, 1e3)
 
-			req.putBack(req); 
-			self.requests.splice(self.requests.findIndex(requests => requests == req), 1)
+		req.timeout = null /* setTimeout(() => {
+			//console.log('timeout')
+			req.putBack(req)
+			//self.requests.splice(self.requests.findIndex(request => request == req), 1)
+			self.requests = self.requests.filter( request => request != req )
 			self.emit('request_timeout') 
 
-		}, 30 * 1e3)
+		}, 30 * 1e3)*/
 
-		req.peer = peer
-		this.requests.push(req)
-
+	/*	req.peer = peer
+		//this.requests.push(req)
 		peer.request(req.index, req.begin, req.length)
 
-	}).bind(this)
+	}).bind(this)*/
 
 	var randReqToPeer = ((peer) => {
 
@@ -924,52 +935,33 @@ Downloader.prototype.downloadPiecelets = function() {
 
 			randomIndex = Math.floor(Math.random() * pieceList.length) //maybe favour pieces that idle peers have ??
 			piece = Array.from(pieces)[randomIndex]
-			pieceletReq = this.activePieces.get(piece).randPieceletReq()
+			pieceletReq = this.activePieces.get(piece).randPieceletReq(peer)
 
 			if(!pieceletReq)
 				pieceList.splice(randomIndex, 1)
 
 		} while (!pieceletReq && pieceList.length > 0) 
 
-		if(pieceletReq) 
-			reqToPeer( peer, pieceletReq )
+		if(pieceletReq)
+			peer.request(pieceletReq)
+			//reqToPeer( peer, pieceletReq, piece )
 
 		return pieceletReq
 
 	}).bind(this)
+	
+	let peersWithOutstandingReq = new NSet(this.requests.map( req => req.peer ) )
+	let peersWithFourOutstandingReq = peersWithOutstandingReq.filter( peer => this.requests.reduce( (count, req) => req.peer == peer ? (count + 1): count, 0) > 1 )
+	peers = peers.difference(peersWithFourOutstandingReq)
 
-	var repeat = (elem, num, arr) => {
+	while(this.activePieces.getArray().map(piece => piece.requests.length).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
 
-		while(num-- > 0)
-			arr.push(elem)
-
-	}
-
-	// all zeros
-	//let arr = Array.from(peers)
-	//let rates = arr.map( peer => this.swarm.peerStats.get(peer.peerID).downRate )
-	//let total = rates.reduce( (sum, rate) => sum + rate )
-	//let numReq = this.activePieces.getArray().map( piece => piece.requests.length ).reduce( (sum, len) => sum + len, 0 )
-	//let minRate = Math.min(...rates)
-
-	let peersWithOutstandingReq = new NSet(this.requests.map( req => req.peer ))
-	peers = peers.difference(peersWithOutstandingReq)
-
-
-	while(this.requests.length < peers.size * 4 && peers.size > 0 && this.activePieces.size > 0 ) {
-
-		//randomly select peer - more heavily weight idle peers
 		let rand = Math.random()
 		let randPeer = Array.from(peers)[Math.floor(rand) * peers.size]	
 
-		//for(var i = 0 ; i < 4; i++) {
-		if(!randReqToPeer(randPeer) ) { //no more piecelets
-
+		if( randPeer.requestList.length > 1 || !randReqToPeer(randPeer) ) //no more piecelets or more than 4 req
 			peers.delete(randPeer) 
-			break
 
-		}
-		//}
 	}
 
 }

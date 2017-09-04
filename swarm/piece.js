@@ -112,6 +112,9 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.pieceletLength = 2 ** 14
 		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
 		this.piecelets = new Map() 
+		//#requests + #dispRequests + #piecelets = total piecelets
+		this.requests = []
+		this.dispRequests = []
 
 		this.left = 0
 		this.right = this.left + this.pieceLength
@@ -125,12 +128,20 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		let left = this.left, self = this
 
 		while ( left < this.right ) {
-
+			
 			let length = (this.right - left) / this.pieceletLength > 1 ? this.pieceletLength : (this.right - left) 
 			let request = { index : this.index, begin : left, length : length}
-			request.putBack = () => { self.requests.push(request) }
+
+			/*request.putBack = () => {
+
+				self.requests.push(request)
+			 	self.dispRequests = self.dispRequests.filter( req => req != request)
+
+			}*/
+
 			yield request
 			left += this.pieceletLength
+
 		}
 
 		return false
@@ -140,6 +151,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	makeRequests() {
 
 		this.requests = []
+		this.dispRequests = []
 		var gen = this.nextPiecelet()
 		var next = gen.next()
 
@@ -156,7 +168,24 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		let left = start
 		let right = left + piecelet.length
-		this.piecelets.set(left+","+right, piecelet)
+		this.piecelets.set(left + "," + right, piecelet)
+
+		let pos = this.dispRequests.findIndex( req => req.index == index && req.begin == start && req.length == piecelet.length )
+		
+		if(pos != -1) {
+
+			let request = this.dispRequests.splice(pos, 1)[0]
+			clearTimeout(request.timeout)
+
+		}
+
+		pos = this.requests.findIndex( req => req.index == index && req.begin == start && req.length == piecelet.length )
+
+		if(pos != -1)
+			this.requests.splice(pos, 1)
+
+		//write piece
+		//this.writePiecelet(start, piecelet.length, piecelet)
 		
 	}
 
@@ -164,7 +193,8 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		let left = this.index * this.pieceletLength + start
 		let right = left + length
-		return !!this.piecelets.get(left+","+right) 
+		//return !!this.piecelets.get(left+","+right)
+		return this.piecelets.has(left + "," + right) 
 
 	}
 
@@ -196,8 +226,9 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			let lefts = Array.from(this.piecelets.keys()).filter( k => Number(k.split(',')[0]) <= left)
 			let maxRight = Math.max( ...lefts.map( k =>  Number(k.split(',')[1]) ) )
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
-			let piecelet = this.piecelets.get(interval)
 
+			let piecelet = this.piecelets.get(interval)
+			//let piecelet = await 
 			piecelet.copy(buf, Number(interval.split(',')[0]), 0, piecelet.length)
 
 			left = maxRight
@@ -214,6 +245,41 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		return false
 
 	}
+
+	writePiecelet(begin, length, buf) {
+
+		let start = this.index * this.normalPieceLength
+		let end = start + length
+
+		let leftBound = 0, fileBounds = []
+
+		for(var i = 0 ; i < this.fileLengthList.length; i++) {
+
+			let rightBound = leftBound + this.fileLengthList[i]
+			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
+				fileBounds.push([i, leftBound, rightBound])
+			leftBound = rightBound
+
+		}
+
+		try {
+
+			fileBounds.forEach( bound => {
+
+				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
+				let chunklet = buf.slice( (chunkletStart - start) , chunkletEnd - start)
+				fs.createWriteStream( this.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd - 1} ).end(chunklet)
+
+			})
+
+		} catch (error) {
+
+			return false
+		}
+
+		return true
+
+	}	
 
 	writePiece(buf) {
 
@@ -248,12 +314,34 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		return true
 
-	}	
+	}
 
-	randPieceletReq() {
+	randPieceletReq(peer) {
 
+		let self = this
 		let reqIdx = Math.floor(Math.random() * this.requests.length)
-		return this.requests.splice(reqIdx, 1)[0]
+		let req = this.requests.splice(reqIdx, 1)[0] //undefined if requests is empty
+
+		if(req) {
+
+			this.dispRequests.push(req)
+
+			var _putBack = () => {
+
+				let pos = self.dispRequests.findIndex( request => request == req )
+				if(pos != -1) {
+					self.requests.push(req)
+					self.dispRequests.splice(pos, 1)
+				}
+
+			}
+
+			req.timeout = setTimeout( _putBack, 30 * 1e3)
+			req.putBack = _putBack
+
+		}
+
+		return req
 
 	}	 
 

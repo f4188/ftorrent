@@ -78,6 +78,7 @@ function Peer(fileMetaData, download, sock, checkID) {
 		[EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : (this._pExHandShake).bind(this) }
 	}
 
+	this.requestList = []
 
 	this.pRequestList = [] //serialize requests here so can cancel latter
 	this.pRequest = null
@@ -169,6 +170,13 @@ Peer.prototype._pHandshake = function (peerID, supportsDHT, supportsExten) {
 Peer.prototype._pChoke = function () {
 
 	this.pChoked = true //kill all requests??
+
+	this.requestList.forEach( req => {
+		clearTimeout(req.timeout)
+		req.putBack()
+	})
+
+	this.requestList = []
 	this.emit('peer_choked')
 
 }
@@ -265,6 +273,9 @@ Peer.prototype._fulfillRequest = function() { //expects pRequest to be null and 
 
 Peer.prototype._pPiece = function (index, begin, piece) {//, uploadTime) {
 
+	let pos = this.requestList.findIndex( req => req.index == index && req.begin == begin && req.length == piece.length)
+	if(pos != -1)
+		this.requestList.splice(pos, pos)
 	this.emit('peer_piece', this, index, begin, piece)
 
 }
@@ -448,9 +459,10 @@ Peer.prototype.bitfield = function () {
 
 }
 
-Peer.prototype.request = function(index, begin, length) {
+Peer.prototype.request = function(request) {
 
-	this.push(this._makeMsg(REQUEST_MSG_TYPE, index, begin, length))
+	this.requestList.push(request)
+	this.push(this._makeMsg(REQUEST_MSG_TYPE, request.index, request.begin, request.length))
 
 }
 

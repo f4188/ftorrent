@@ -1,6 +1,4 @@
 
-//var  magnetLink= 'magnet:?xt=urn:btih:32843bef0b20ba67b095ec47d923f90c64bc7787&dn=Wonder.Woman.2017.HDTS.1080P.x264&tr=udp%3A%2F%2Ftracker.leechers-paradise.org%3A6969&tr=udp%3A%2F%2Fzer0day.ch%3A1337&tr=udp%3A%2F%2Fopen.demonii.com%3A1337&tr=udp%3A%2F%2Ftracker.coppersurfer.tk%3A6969&tr=udp%3A%2F%2Fexodus.desync.com%3A6969'
-
 const dgram = require('dgram')
 const randomBytes = require('crypto').randomBytes
 const dns = require('dns')
