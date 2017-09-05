@@ -8,8 +8,8 @@ const randomAccessFile = require('random-access-file')
 
 const NSet = require('../lib/NSet.js').NSet
 const NMap = require('../lib/NSet.js').NMap
-const ActivePieces = require('./piece2.js').ActivePieces
-const Pieces = require('./piece2.js').Pieces
+const ActivePieces = require('./piece.js').ActivePieces
+const Pieces = require('./piece.js').Pieces
 const UDPTracker = require('../tracker/index.js').UDPTracker
 const HTTPTracker = require('../tracker/index.js').HTTPTracker
 const DHT = require('../dht/index.js').DHT
@@ -619,7 +619,6 @@ Downloader.prototype.setMetaInfoFile = async function (metaInfoFilePath) {
 			this.fileMetaData.announceUrlList = this.fileMetaData.announceUrlList.concat( announceList.map( url => url[0].toString()) )
 	}
 	
-	//let seeding = 
 	fileMetaData.metaInfoRaw = info
 	let seeding = await this.setMetaInfo(benEncode(info))
 	fileMetaData.ready = true
@@ -645,11 +644,8 @@ Downloader.prototype.setMagnetUri = function(magnetUri) {
 
 Downloader.prototype.setMetaInfo = async function (info) {
 
-	//fs.createWriteStream('./meta').end(info)
-	//console.log(info)
 	let fileMetaData = this.fileMetaData
 
-	//fileMetaData.metaInfoRaw = info
 	fileMetaData.metaInfoSize = info.length
 	fileMetaData.infoHash = new Buffer(crypto.createHash('sha1').update(info).digest('hex'), 'hex')
 	//fileMetaData.date = ['creation date']
@@ -671,14 +667,21 @@ Downloader.prototype.setMetaInfo = async function (info) {
 	} else { 
 
 		fileMetaData.isDirectory = true
-		fileMetaData.fileLengthList = m.files.map( pairs => pairs.length )
-		fileMetaData.fileLength = fileMetaData.fileLengthList.reduce( (a, b) => a + b, 0)
-		fileMetaData.pathList = m.files.map( pairs => pairs.path ).map( name => './' + name)
+		fileMetaData.fileLengthList = m.files.map( pair => pair.length )
+		fileMetaData.fileLength = fileMetaData.fileLengthList.reduce( (sum, b) => sum + b, 0)
+		fileMetaData.pathList = m.files.map( pair => pair.path ).map( name => './' + name)
+		console.log(fileMetaData.fileLength)
+		console.log(fileMetaData.fileLengthList)
+		console.log(fileMetaData.pathList)
+		console.log(fileMetaData.pieceLength)
 
 	}
 
 	fileMetaData.files = fileMetaData.pathList.map( path => randomAccessFile(path) )
 	fileMetaData.numPieces = Math.ceil( fileMetaData.fileLength / fileMetaData.pieceLength) 
+	console.log(fileMetaData.numPieces)
+	console.log(m)
+
 
 	this.Piece = Pieces(fileMetaData)
 	this.ActivePiece = ActivePieces(fileMetaData)
@@ -914,13 +917,14 @@ Downloader.prototype.downloadPieces = function() {
 
 	/////////////////
 	hist = this.swarm.piecesByFreq2(peers).map( tuple => tuple[0] )
-	hist = hist.filter( x => x || (x == 0) )
+	hist = hist.filter( x => x || (x == 0))
 	hist = hist.filter(x => x < this.fileMetaData.numPieces)
 	///////////////
 
-	while( this.activePieces.size < maxActivePieces() && hist.length > 0 && this.pieces.size < this.fileMetaData.numPieces ) {
-	//	console.log('looping', maxActivePieces(), this.activePieces.size, hist.length, this.fileMetaData.numPieces)
+	while( this.activePieces.size < maxActivePieces() && hist.length > 0 && this.activePieces.size < hist.length &&  this.pieces.size < this.fileMetaData.numPieces ) {
+		//console.log('looping', maxActivePieces(), this.activePieces.size, hist.length, this.fileMetaData.numPieces)
 		//f.write('download pieces' + )
+		//console.log(hist)
 		let randArrIdx = Math.floor(Math.pow(Math.random(), 3) * hist.length)
 		let pIndex = hist[randArrIdx]
 		this.activePieces.set(Number(pIndex), new this.ActivePiece(Number(pIndex)))
@@ -955,7 +959,7 @@ Downloader.prototype.downloadPiecelets = function() {
 		let pieceList = Array.from(pieces)
 
 		do { //randomly select piece, get piecelet or if no piecelet then repeat
-
+			//console.log('getting piecelet')
 			randomIndex = Math.floor(Math.random() * pieceList.length) //maybe favour pieces that idle peers have ??
 			piece = Array.from(pieces)[randomIndex]
 			pieceletReq = this.activePieces.get(piece).randPieceletReq(peer)
@@ -980,7 +984,7 @@ Downloader.prototype.downloadPiecelets = function() {
 
 	//while(this.activePieces.getArray().map(piece => piece.requests.length).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
 	while(this.activePieces.getArray().map(piece => piece.requestsLeft()).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
-
+		console.log('looping 2', peers.size, this.activePieces.size, this.activePieces.getArray().map(piece => piece.requestsLeft()).reduce((sum, numReqs) => sum + numReqs, 0) )
 		let rand = Math.random()
 		let randPeer = Array.from(peers)[Math.floor(rand) * peers.size]	
 
