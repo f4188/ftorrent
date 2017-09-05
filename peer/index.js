@@ -60,8 +60,10 @@ function Peer(fileMetaData, download, sock, checkID) {
 
 	var _handleDisconnect = () => {
 
-		if(self.state == self.STATES.connected)
+		if(self.state == self.STATES.connected) {
+			//self.emit('peer_choked', self)
 			self.emit('disconnected', self)
+		}
 		self.state = self.STATES.disconnected
 
 	}
@@ -78,7 +80,7 @@ function Peer(fileMetaData, download, sock, checkID) {
 		[EXTENDED_MSG_TYPE] : { [EXTENDED_HANDSHAKE_MSG_TYPE] : (this._pExHandShake).bind(this) }
 	}
 
-	this.requestList = []
+	//this.requestList = []
 
 	this.pRequestList = [] //serialize requests here so can cancel latter
 	this.pRequest = null
@@ -171,13 +173,14 @@ Peer.prototype._pChoke = function () {
 
 	this.pChoked = true //kill all requests??
 
-	this.requestList.forEach( req => {
+	/*this.requestList.forEach( req => {
 		clearTimeout(req.timeout)
 		req.putBack()
 	})
 
-	this.requestList = []
-	this.emit('peer_choked')
+	this.requestList = []*/
+
+	this.emit('peer_choked', this)
 
 }
 
@@ -273,9 +276,10 @@ Peer.prototype._fulfillRequest = function() { //expects pRequest to be null and 
 
 Peer.prototype._pPiece = function (index, begin, piece) {//, uploadTime) {
 
-	let pos = this.requestList.findIndex( req => req.index == index && req.begin == begin && req.length == piece.length)
+	/*let pos = this.requestList.findIndex( req => req.index == index && req.begin == begin && req.length == piece.length)
 	if(pos != -1)
-		this.requestList.splice(pos, pos)
+		this.requestList.splice(pos, pos)*/
+
 	this.emit('peer_piece', this, index, begin, piece)
 
 }
@@ -355,6 +359,8 @@ Peer.prototype._pExHandShake = function(payload) {
 	this.pVersion = v
 
 	this.supportedExtensions = m
+
+	this.emit('connected_extensions', this)
 	
 }
 
@@ -461,7 +467,7 @@ Peer.prototype.bitfield = function () {
 
 Peer.prototype.request = function(request) {
 
-	this.requestList.push(request)
+	//this.requestList.push(request)
 	this.push(this._makeMsg(REQUEST_MSG_TYPE, request.index, request.begin, request.length))
 
 }
@@ -495,7 +501,12 @@ Peer.prototype._write = function(obj, encoding, callback) {
 	} else {
 
 		handler = this.msgHandlers[type]
+		try {
 		handler( ... Object.values(obj.args) )
+		} catch(error) {
+			console.log(error)
+			console.log(obj)
+		}
 
 	}
 	  //{type : _ , args : { _ }} or {type : _ , args : [ extype ,  payload]} 
@@ -614,22 +625,19 @@ class BitTorrentMsgParser extends Transform {
 
 	parseHaveMsg(msg) {
 
-		return msg.readUInt32BE() //just return int
+		return msg.readUInt32BE(0) //just return int
 
 	}
 
 	parseBitFieldMsg(msg) {
 
-		if(!this.file.numPieces)
-			return 
-
 		let bitField = []
 		let self = this
 
-		msg.forEach(function(byte, i, v) {
+		msg.forEach( function(byte, i, v) {
 
-			for(let j = 0 ; j < 8 ; j++) {
-				if(byte & 0x80 && (i * 8 + j) < self.file.numPieces)
+			for (let j = 0 ; j < 8 ; j++) {
+				if ( byte & 0x80 )//&& (i * 8 + j) ) //< self.file.numPieces)
 					bitField.push(i * 8 + j)
 				byte <<= 1
 			}
@@ -669,8 +677,8 @@ class BitTorrentMsgParser extends Transform {
 
 		let type = msg.readUInt8(0)
 		//benDecode must only parse longest valid bencoded string
-		let payload = benDecode(msg.slice(1))
-		payload.data = msg.slice(payload.length)
+		let payload = benDecode(msg.slice(1)), payloadLength = benEncode(payload).length
+		payload.data = msg.slice(payloadLength + 1)
 
 		return { exType : type, args : payload } //{extype: _ , args : { _ , _ , data : ... }}
 

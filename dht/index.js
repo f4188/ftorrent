@@ -10,7 +10,7 @@ benEncode = require('bencode').encode
 Peer = require('../lib/PeerInfo.js').PeerInfo
 NSet = require('../lib/NSet.js').NSet
 
-LOG = true
+LOG = false
 
 const NODE_STATE = { GOOD: 0, QUES : 1, BAD : 2}
 
@@ -81,9 +81,12 @@ class DHT {
 
 		if(sock)
 			this.sock = sock
+
 		else {
+
 			this.sock = dgram.createSocket('udp4')
 			this.sock.bind(port)
+
 		}
 
 		this.sock.setMaxListeners(400)
@@ -239,10 +242,8 @@ class DHT {
 		this.myNodeID = crypto.randomBytes(20).toString('hex')
 		this.makeNode(this.myNodeID ,this.port, this.host)
 
-		let bootstrapNodeAddrs = [[6881, 'router.bittorrent.com'], [6881, 'dht.transmissionbt.com'], [6881, 'router.utorrent.com']]
-		
+		let bootstrapNodeAddrs = [[6881, 'router.bittorrent.com'], [6881, 'dht.transmissionbt.com'], [6881, 'router.utorrent.com']]		
 		let ips = await Promise.race(bootstrapNodeAddrs.map( node =>  this.lookup(node[1])))
-		console.log('ip:', ips)
 		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock) //do not insert in routing table
 
 		let nodes, node
@@ -282,7 +283,7 @@ class DHT {
 		let self = this
 		nodes.forEach(node => self.getNode(node).announcePeer(infoHash, port))
 		
-		return peers.map( peer => {return {ip : peer.host, port : peer.port}} )
+		return peers.map( peer => { return {ip : peer.host, port : peer.port} } )
 
 	}
 
@@ -374,6 +375,7 @@ class DHT {
 
 		return new Promise( (resolve, reject) => {
 
+			let startTime = Date.now()
 			let [peers, nodes] = this.getPeers(nodeID)
 			let allNodes = new NSet(nodes), queriedNodes = new NSet(), kClosest = nodes, kClosestCount = 0
 			let pQueue, map = this.nodes, myNodeID = this.myNodeID
@@ -401,11 +403,12 @@ class DHT {
 								allPeers.push(peer)
 						})
 					else 
-						allPeers = Array.from(new NSet(allPeers.concat(peers)))
+						allPeers = Array.from(new NSet(allPeers.concat(peers))) //no need for set - peer objects are not unique
 
 				}
 
-				if(kClosestCount >= 8 || allPeers.length > 50)
+				if((Date.now() - startTime) > 3 * 60 * 1e3  || kClosestCount > 1000 || kClosestCount >= 8 && allPeers.length > 0 
+					|| allPeers.length > 50 || allNodes.difference(queriedNodes).size == 0 && pQueue.idle())
 					return true
 
 				let nextNodes = Array.from(allNodes.difference(queriedNodes)).sort(xorCompare(nodeID))

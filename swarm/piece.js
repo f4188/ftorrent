@@ -7,16 +7,25 @@
 
 var fs = require('graceful-fs')
 
-var readStreamFunc = (path, start, end) => {
+var readStreamFunc = (path, start, end, file) => {
 
 	return new Promise( (resolve, reject) => {
 
-		let buf = new Buffer(0)
-		let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
+		//let buf = new Buffer(0)
+		file.read(start, end - start, function (err, buf) { 
+
+			if(err)
+				reject(err)
+			else
+				resolve(buf) 
+
+		}) 
+
+		/*let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
 
 		pieceStream.on('error', (error) => { reject(error) } )
 		pieceStream.on('data', (data) => { buf = Buffer.concat([buf, data]) })
-		pieceStream.on('end', () => { resolve(buf) })
+		pieceStream.on('end', () => { resolve(buf) }) */
 
 	})
 
@@ -30,6 +39,7 @@ var Pieces = (file) => class Piece {
 
 		this.path = file.path
 		this.pathList = file.pathList
+		this.files = file.files
 		this.fileLengthList = file.fileLengthList
 
 		this.index = index 
@@ -68,7 +78,7 @@ var Pieces = (file) => class Piece {
 
 				try {
 
-					return await readStreamFunc(this.pathList[bound[0]], chunkletStart, chunkletEnd)
+					return await readStreamFunc(this.pathList[bound[0]], chunkletStart, chunkletEnd, this.files[bound[0]])
 
 				} catch (error) {
 
@@ -115,6 +125,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		//#requests + #dispRequests + #piecelets = total piecelets
 		this.requests = []
 		this.dispRequests = []
+	//	this.requestList = new Map()
 
 		this.left = 0
 		this.right = this.left + this.pieceLength
@@ -130,15 +141,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		while ( left < this.right ) {
 			
 			let length = (this.right - left) / this.pieceletLength > 1 ? this.pieceletLength : (this.right - left) 
-			let request = { index : this.index, begin : left, length : length}
-
-			/*request.putBack = () => {
-
-				self.requests.push(request)
-			 	self.dispRequests = self.dispRequests.filter( req => req != request)
-
-			}*/
-
+			let request = { index : this.index, begin : left, length : length, dispatched : 0}
 			yield request
 			left += this.pieceletLength
 
@@ -152,12 +155,14 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		this.requests = []
 		this.dispRequests = []
+		//this.requestList = new Map()
 		var gen = this.nextPiecelet()
 		var next = gen.next()
 
 		while(!next.done) {
 
 			this.requests.push(next.value)
+		//	this.requestList.set(next.begin + "," + (next.begin + next.length), next.value)
 			next = gen.next()
 
 		}
@@ -169,6 +174,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		let left = start
 		let right = left + piecelet.length
 		this.piecelets.set(left + "," + right, piecelet)
+		//this.requestList.get(start + "," + (start + piecelet.length)).dispatched = 2
 
 		let pos = this.dispRequests.findIndex( req => req.index == index && req.begin == start && req.length == piecelet.length )
 		
@@ -240,8 +246,8 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		if( hash == this.hash)
 			return this.writePiece(buf)
 
-		this.makeRequests()
-		this.piecelets = new Map()
+		//this.makeRequests()
+		//this.piecelets = new Map()
 		return false
 
 	}
@@ -268,13 +274,16 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 				let chunkletStart = Math.max(bound[1], start), chunkletEnd = Math.min(bound[2], end)
 				let chunklet = buf.slice( (chunkletStart - start) , chunkletEnd - start)
-				fs.createWriteStream( this.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd - 1} ).end(chunklet)
+				
+				this.files[bound[0]].write(chunkletStart, chunklet, function(err) {} )
+				//fs.createWriteStream( this.pathList[bound[0]], {start : chunkletStart, end: chunkletEnd - 1} ).end(chunklet)
 
 			})
 
 		} catch (error) {
 
 			return false
+
 		}
 
 		return true
@@ -285,6 +294,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		let start = this.index * this.normalPieceLength
 		let end = start + this.pieceLength
+		return this.writePiecelet(start, this.pieceLength, buf)
 
 		let leftBound = 0, fileBounds = []
 
@@ -328,6 +338,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 			var _putBack = () => {
 
+				req.dispatched = req.dispatched != 2 ? 0 : 2
 				let pos = self.dispRequests.findIndex( request => request == req )
 				if(pos != -1) {
 					self.requests.push(req)
@@ -340,6 +351,8 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			req.putBack = _putBack
 
 		}
+
+		req.dispatched = 1
 
 		return req
 
