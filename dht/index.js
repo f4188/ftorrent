@@ -8,6 +8,7 @@ benDecode = require('bencode').decode
 benEncode = require('bencode').encode
 
 Peer = require('../lib/PeerInfo.js').PeerInfo
+parsePeerContactInfos = require('../lib/PeerInfo.js').parsePeerContactInfos
 NSet = require('../lib/NSet.js').NSet
 
 LOG = false
@@ -44,8 +45,6 @@ var readStreamFunc = async (path) => {
 
 	})
 }
-
-var makeNode
 
 class TimeoutError extends Error {}
 class KRPCError extends Error {}
@@ -123,7 +122,7 @@ class DHT {
 
 				if(!node) {
 
-					node = new Node(nodeID, port, host, this.myNodeID, this.sock)
+					node = new Node(nodeID, port, host, this.myNodeID, this.sock, this.parseNodeContactInfos)
 					this.nodes.set(nodeID, node)
 
 				} else {
@@ -141,7 +140,6 @@ class DHT {
 		}
 
 		this.makeNode = this._makeNode()
-		makeNode = this.makeNode
 
 	}
 
@@ -244,7 +242,7 @@ class DHT {
 
 		let bootstrapNodeAddrs = [[6881, 'router.bittorrent.com'], [6881, 'dht.transmissionbt.com'], [6881, 'router.utorrent.com']]		
 		let ips = await Promise.race(bootstrapNodeAddrs.map( node =>  this.lookup(node[1])))
-		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock) //do not insert in routing table
+		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock, this.parseNodeContactInfos) //do not insert in routing table
 
 		let nodes, node
 		let tries = 0
@@ -712,6 +710,30 @@ class DHT {
 
 	}
 
+	parseNodeContactInfos(compactInfos) {
+
+		var slicer = (buf) => {
+
+			let slices = []
+			while(buf.length > 0) {
+				slices.push(buf.slice(0,26))
+				buf = buf.slice(26)
+			}
+			return slices
+
+		}
+
+		return slicer(compactInfos).map(info => {
+
+			let parsedHost = info.slice(20,24).toString('hex').match(/.{2}/g).map( num => Number('0x'+num)).join('.') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
+			let parsedPort = info.slice(24,26).readUInt16BE()
+
+			return this.makeNode(info.slice(0,20).toString('hex'), parsedPort, parsedHost)
+		
+		})
+
+	}
+
 }
 
 class Bucket {
@@ -807,7 +829,7 @@ class Bucket {
 
 class Node {
 
-	constructor(nodeID, port, host, myNodeID, sock) {
+	constructor(nodeID, port, host, myNodeID, sock, parseNodeContactInfos) {
 
 		this.nodeID = nodeID
 		this.port = port
@@ -823,28 +845,7 @@ class Node {
 		this.respTimer
 		this.queryTimer
 		this.numNoResp = 0
-
-		this.parseNodeContactInfos = function parseNodeInfos(compactInfos) {
-
-			var slicer = (buf) => {
-				let slices = []
-				while(buf.length > 0) {
-					slices.push(buf.slice(0,26))
-					buf = buf.slice(26)
-				}
-				return slices
-			}
-
-			return slicer(compactInfos).map(info => {
-
-				let parsedHost = info.slice(20,24).toString('hex').match(/.{2}/g).map( num => Number('0x'+num)).join('.') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
-				let parsedPort = info.slice(24,26).readUInt16BE()
-
-				return makeNode(info.slice(0,20).toString('hex'), parsedPort, parsedHost)
-			
-			})
-
-		}
+		this.parseNodeContactInfos = parseNodeContactInfos
 	
 	}
 
@@ -860,7 +861,7 @@ class Node {
 
 	}
 
-	parsePeerContactInfos(compactInfos, nodeID) {
+/*	parsePeerContactInfos(compactInfos, nodeID) {
 
 		var slicer = (buf) => {
 
@@ -882,7 +883,7 @@ class Node {
 
 		})
 
-	}
+	}*/
 
 	get state() {
 
@@ -1005,7 +1006,7 @@ class Node {
 				nodes = this.parseNodeContactInfos(response.r.nodes)
 
 			if(response.r.values)
-				peers = this.parsePeerContactInfos(response.r.values, response.r.id)
+				peers = parsePeerContactInfos(response.r.values, response.r.id)
 
 			return [ peers, nodes ]
 

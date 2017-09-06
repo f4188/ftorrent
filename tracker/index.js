@@ -45,8 +45,10 @@ class HTTPTracker {
 		this.file = file
 		this.download = download
 		this.url = url.href
+		this.host = url.hostname
 		this.interval = null
 		this.default_timeout = 3000
+		this.online = true
 
 	}
 
@@ -73,7 +75,7 @@ class HTTPTracker {
 
 		} catch (error) {
 
-			console.log(error)
+		//	console.log(error)
 			
 			return {}
 
@@ -101,7 +103,6 @@ class HTTPTracker {
 			let timeout = setTimeout(() => { reject('timeout') } , this.default_timeout)
 
 			request({url : this.url, qs : params}, function(err, response, body) {
-				console.log(response)
 				//console.log('response',response)
 				//console.log('body', body)
 				if(err)
@@ -128,6 +129,7 @@ function UDPTracker(url, infoHash, peerID, stats) {
 	//tracker address
 	this.host = url.hostname
 	this.port = parseInt(url.port)
+	this.online = true
 
 	this.infoHash = infoHash
 	this.peerID = peerID
@@ -181,7 +183,7 @@ UDPTracker.prototype._sendConnectRequest = function(request) {
 		let timeout = setTimeout( () => { reject('timeout') } , this.default_timeout)
 
 		this.client.once('message', (msg, rsinfo) => {
-			console.log(msg)
+
 			if( new Response(msg).getAction() == UDPRes.CONNECT_ACTION) {
 
 				clearTimeout(timeout)
@@ -210,7 +212,7 @@ UDPTracker.prototype.doAnnounce = async function(myPort) {
 	//this.stats = stats
 
 	this.client.on('error', (err) => {
-		console.log("oops: ${err.stack}"); 
+	//	console.log("oops: ${err.stack}"); 
 	});
 	
 	this.transactID = randomBytes(4);
@@ -239,9 +241,12 @@ UDPTracker.prototype.doAnnounce = async function(myPort) {
 
 	} catch (error) {
 
-		console.log(error)
+		this.online = false
+		//console.log(error)
 
 	}
+
+	this.online = true
 
 	return { 
 

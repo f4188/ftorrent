@@ -1,6 +1,6 @@
 
 const EXTENDED_MSG_TYPE = 20
-const META_MSG = 14 
+const META_MSG = 14 //kill
 const METADATAEX_MSG_TYPE = 1
 const METADATA_PIECE_LEN = 2 ** 14
 
@@ -15,8 +15,9 @@ let UTMetaDataEx = (SuperClass) => class MetaDataEx extends SuperClass {
 
 		this.recvExtensions['ut_metadata'] = METADATAEX_MSG_TYPE
 		this.msgHandlers[EXTENDED_MSG_TYPE][METADATAEX_MSG_TYPE] = (this.router).bind(this)
-		this.msgHandlers[META_MSG] = {}
-		this.msgHandlers[META_MSG][METADATAEX_MSG_TYPE] = (this.router).bind(this)
+
+		this.msgHandlers[META_MSG] = {}	//kill
+		this.msgHandlers[META_MSG][METADATAEX_MSG_TYPE] = (this.router).bind(this) //kill
 		this.metaInfoPieces = new Map()
 		this.total_size = null
 				
@@ -76,7 +77,7 @@ let UTMetaDataEx = (SuperClass) => class MetaDataEx extends SuperClass {
 	}
 
 	pMetaDataExData(args) {
-	
+
 		if(this.fileMetaData.metaInfoRaw)
 			return
 

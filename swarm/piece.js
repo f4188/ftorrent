@@ -11,7 +11,6 @@ var readStreamFunc = (path, start, end, file) => {
 
 	return new Promise( (resolve, reject) => {
 
-		//let buf = new Buffer(0)
 		file.read(start, end - start, function (err, buf) { 
 
 			if(err)
@@ -20,12 +19,6 @@ var readStreamFunc = (path, start, end, file) => {
 				resolve(buf) 
 
 		}) 
-
-		/*let pieceStream = fs.createReadStream(path, {start : start , end : end - 1})
-
-		pieceStream.on('error', (error) => { reject(error) } )
-		pieceStream.on('data', (data) => { buf = Buffer.concat([buf, data]) })
-		pieceStream.on('end', () => { resolve(buf) }) */
 
 	})
 
@@ -64,8 +57,10 @@ var Pieces = (file) => class Piece {
 		for(var i = 0 ; i <this.fileLengthList.length; i++) {
 
 			let rightBound = leftBound + this.fileLengthList[i]
+
 			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
 				fileBounds.push([i, leftBound, rightBound])
+
 			leftBound = rightBound
 
 		}
@@ -123,6 +118,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
 		this.piecelets = new Map() 
 		this.requestList = new Map()
+		this.dispatchList = new Map()
 
 		this.left = 0
 		this.right = this.left + this.pieceLength
@@ -154,9 +150,11 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		var next = gen.next()
 
 		while(!next.done) {
+
 			let req = next.value
 			this.requestList.set(req.begin + "," + (req.begin + req.length), req)
 			next = gen.next()
+
 
 		}
 
@@ -169,6 +167,9 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		
 		let request = this.requestList.get(start + "," + (start + piecelet.length))
 		request.dispatched = 2
+
+		//if(this.dispatchList.has(start + "," + (start + piecelet.length)))
+		this.dispatchList.delete(start + "," + (start + piecelet.length))
 		
 		clearTimeout(request.timeout)
 		
@@ -224,6 +225,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			return this.writePiece(buf)
 
 		this.requestList.clear()
+		this.dispatchList.clear()
 		this.makeRequests()
 		this.piecelets.clear()
 		return false
@@ -304,12 +306,13 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	randPieceletReq(peer) {
 
 		let self = this, idx = 0, req
-		let arr = Array.from(this.requestList.values())
+		let arr = Array.from(this.requestList.values()) //too slow
 
 		for( ; idx < arr.length; idx ++ ) {
-			if(arr[idx].dispatched == 0) {
+			if(arr[idx].dispatched == 0) { //this.dispatchList.has(arr[idex].begin + "," + (arr[idx].begin + arr[idx.length]) )
 				req = arr[idx]
 				req.dispatched = 1
+				this.dispatchList.set(req.begin + "," + (req.begin + req.length), req)
 				break
 			}
 		}
@@ -319,6 +322,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			var _putBack = () => {
 				
 				req.dispatched = req.dispatched == 2 ? 2 : 0
+				this.dispatchList.delete(req.begin + "," + (req.begin + req.length))
 
 			}
 
@@ -331,9 +335,10 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	}
 
-	requestsLeft() {
+	requestsLeft() { //too slow
 
-		return Array.from(this.requestList.values()).reduce( (sum, request) => request.dispatched == 0 ? sum + 1 : sum, 0)
+		return this.requestList.size - this.dispatchList.size
+		//return Array.from(this.requestList.values()).reduce( (sum, request) => request.dispatched == 0 ? sum + 1 : sum, 0 )
 	}	 
 
 }

@@ -1,42 +1,54 @@
 
 //EXTENDED_MSG_TYPE
 const EXTENDED_MSG_TYPE = 20 
-const PEEREX_MSG_TYPE = 1
-//PPEEREX_MSG_TYPE
+const PEEREX_MSG_TYPE = 2
 
-benEncode = require('bencode').encode
-var PeerInfo = require('PeerInfo.js')
+const benEncode = require('bencode').encode
+const PeerInfo = require('../lib/PeerInfo.js').PeerInfo
+//const parsePeerContactInfosIP4 = require('../lib/PeerInfo.js').parsePeerContactInfos
 
-let PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
+f = fs.createWriteStream('./peerexlog.log')
+
+var PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 	
-	constructor(args...) {
+	constructor( ...args ) {
 
-		super(args)
-		this.recvExtensions['ut_pex'] = [PEEREX_MSG_TYPE]
-		this.msgHandlers[EXTENDED_MSG_TYPE][PEEREX_MSG_TYPE] = this.pPeerExchange
+		super( ...args )
+
+		this.recvExtensions['ut_pex'] = PEEREX_MSG_TYPE
+		this.msgHandlers[EXTENDED_MSG_TYPE][PEEREX_MSG_TYPE] = (this.pPeerExchange).bind(this)
 
 	}
 
 	pPeerExchange (args) {
 
-		let {added, added6, dropped, dropped6} = args
 
+		f.write( JSON.stringify(Date.now()) +JSON.stringify(args))
+
+		let {added, added6, dropped, dropped6} = args
 		let addedf = args['added.f'], added6f = args['added6.f']
 
-		added = this.parsePeerContactInfosIP4(added) 
-		addedf.forEach( (byte, i) => { peerEx.added[i].parseFlags(byte) } )
+		if(added && added6f) {
+			added = this.parsePeerContactInfosIP4(added) 
+			addedf.forEach( (byte, i) => { added[i].parseFlags(byte) } )
+		}
 
-		added6 = this.parsePeerContactInfosIP6(added6)
-		added6f.forEach( (byte, i) => { peerEx.added6[i].parseFlags(byte) } )
+		if(added6 && added6f) {
+			added6 = this.parsePeerContactInfosIP6(added6)
+			added6f.forEach( (byte, i) => { added6[i].parseFlags(byte) } )
+		}
 
-		dropped = this.parsePeerContactInfosIP4(dropped)
-		dropped6 = this.parsePeerContactInfosIP6(dropped6)
+		if(dropped)
+			dropped = this.parsePeerContactInfosIP4(dropped)
+
+		if(dropped6)
+			dropped6 = this.parsePeerContactInfosIP6(dropped6)
 
 		this.emit('peer_exchange', { added : added, added6 : added6, dropped : dropped, dropped6 : dropped6 })
 
 	}
 
-	PeerExchange (peerInfos, droppedPeerInfos) {
+	peerExchange (peerInfos, droppedPeerInfos) {
 
 		if(!this.supportsExtensions['ut_pex'])
 			return
@@ -56,18 +68,60 @@ let PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 		
 	}
 
-	parsePeerContactInfosIP4(compactInfos) {
+	 parsePeerContactInfosIP4(compactInfos, nodeID) {
 
-		return compactInfos.match(/.{6}/).map(info => new PeerInfo( info.slice(4,6).readUInt16BE(), info.slice(0,4)) )
+	 	//compactInfos = compactInfos || []
+
+		var slicer = (buf) => {
+
+			let slices = []
+			while(buf.length > 0) {
+				slices.push(buf.slice(0, 6))
+				buf = buf.slice(6)
+			}
+			return slices
+
+		}
+
+		return slicer(compactInfos).map(info => {
+
+			if(!info)
+				return
+			
+			let parsedHost = info.slice(0,4).toString('hex').match(/.{2}/g).map( num => Number('0x' + num)).join('.') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
+			let parsedPort = info.slice(4, 6).readUInt16BE()
+
+			return new PeerInfo(parsedPort, parsedHost)
+
+		})
 
 	}
 
 	parsePeerContactInfosIP6(compactInfos) {
 
-		return compactInfos.match(/.{18}/).map(info => new PeerInfo( info.slice(16,18).readUInt16BE(), info.slice(0,16)) )
+		var slicer = (buf) => {
 
+			let slices = []
+			while(buf.length > 0) {
+				slices.push(buf.slice(0, 18))
+				buf = buf.slice(18)
+			}
+			return slices
+
+		}
+
+		return slicer(compactInfos).map(info => {
+
+			if(!info)
+				return
+
+			let parsedHost = info.slice(0,16).toString('hex').match(/.{2}/g).map( num => Number('0x' + num)).join(':') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
+			let parsedPort = info.slice(16, 18).readUInt16BE()
+
+			return new PeerInfo( parsedPort, parsedHost )
+
+		})
 	}
-
 }
 
 module.exports = {
