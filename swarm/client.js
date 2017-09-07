@@ -148,8 +148,20 @@ class Client {
 
 		this.opts = [" New Torrent", "List Torrents", "Start", "Stop", "Peers", "Log", "Pieces", "Settings", "Exit"]
 		this.optScreens = [ this.linkOrFile, this.displayTorrents, 
-		() => { if(!this.torrents[this.idx].optLoop) this.torrents[this.idx].start() ; this.args = []; this.screenFunc = this.displayStatus }, 
-		() => { this.torrents[this.idx].stop(); this.args = []; this.screenFunc = this.displayStatus },  
+
+		() => { 
+
+			//if(this.screenFunc != this.displayStatus) this.screenFunc = this.di
+			if(!this.torrents[this.idx].optLoop) this.torrents[this.idx].start() ; 
+			this.args = []; 
+			this.screenFunc = this.displayStatus 
+		}, 
+
+		() => { 
+			this.torrents[this.idx].stop(); 
+			this.args = []; this.screenFunc = this.displayStatus 
+		},  
+
 		this.displayPeers, this.log, this.displayPieces, this.settings, null]
 
 
@@ -327,6 +339,9 @@ class Client {
 
 				} else {
 
+					if( response.selectedIndex >= 2 && response.selectedIndex <= 6 )
+						return resolve(null)
+
 					self.screenFunc = self.optScreens[response.selectedIndex]
 					resolve(null)
 
@@ -439,7 +454,7 @@ class Client {
 
 			term.nextLine(2)
 			var progress = Math.round(tor.pieces.size / tor.fileMetaData.numPieces * 1000) /10
-			term.right(1).bold("Percent completed: " + progress)
+			term.right(1).bold("Completed: " + progress + " %  ")
 			term.nextLine(1)
 			var repeat = (char, num) => { let str = ""; while(num --> 0) str += char; return str}
 			term.right(1).green(repeat("=", (term.width - 3) * progress / 100)).green( progress ? ">" : "")

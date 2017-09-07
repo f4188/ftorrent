@@ -103,6 +103,52 @@ swarm creates trackers, - sends http, udp announce request
 gets peer list from trackers, creates and contacts peer 
 
 
+check if file exists, if locked or in use by another program
+
+______________________________________
+
+
+	/* :::: for leechers ::::
+
+	(1) only mutually interested 
+	unamchoked --- unchoked - (if active do nothing - if idle) unchoke by upload -- should be 8
+	unamchoked --- choked - unchoke by upload            --have unchoked me - maybe have chosen me as opt unchoke (amOpt)
+	amchoked ----- unchoked - choke                      --have choked me  -- maybe choose as opt unchoke if new (opt)
+	amchoked ----- choke - do nothing                    -- not interested
+	 
+
+	(2) amUnInterested - interested  ------- select as opt unchoke (opt)
+		amchoked -- choked
+
+	(3) amInterested - unInterested  ------- might select me as opt unchoke (amOpt)
+		amchoked -- choked
+		
+	(4) mutually uninterested     - have same pieces or no pieces or both seeders
+		amchoked -- choked
+	*/
+
+	
+	
+	
+	
+	'ae11067a70121017eaebed84d7c8a99afb6cc860',
+  'ae16b54673b836c8215c88581e9974eaa3968c51',
+  'ae11170e9753df2ac6bca9fcbf1f8feb3f27ee6a',
+  'a94b18c3f770bdded2a31832e76ddcb5298341d6', <-
+  'ae11173c870c3e99245e0d1c06b747deb3124da6',
+  'af96cd2359caed9568dc0a246ee50c9d0157f331', <-
+  'ae11176f149ef80e6b5bbb7f98ff158d036a124a',
+  'afcf80637e73b4e6b7e3303ee175cd397c6289db' ] <-
+
+
+[ 'ae12d6027d41876f3e30690120fceef110308b3c',
+  'ae135911d719c66ec5d15f80fc967c1e5747688e',
+  'ae117df423ce96938ef7221caeac02be42c38669',
+  'a94b18c3f770bdded2a31832e76ddcb5298341d6', <-
+  'ae1031a62301b17f8619b437345caa2bc23f3afb', 
+  'af96cd2359caed9568dc0a246ee50c9d0157f331', <-
+  'ae1323a7b3b764a4bbe25a9d85a8dbdac63969ac',
+  'afcf80637e73b4e6b7e3303ee175cd397c6289db' ] <-
 
 
 

@@ -5,6 +5,8 @@ const async = require('async')
 const speedometer = require('speedometer')
 EventEmitter = require('events').EventEmitter
 const randomAccessFile = require('random-access-file')
+const path = require("path")
+
 const NSet = require('../lib/NSet.js').NSet
 const NMap = require('../lib/NSet.js').NMap
 const ActivePieces = require('./piece.js').ActivePieces
@@ -32,7 +34,7 @@ const CONNECT_LOOP_INTERVAL = 60 * 1e3
 const PRUNE_IGNORE_TIME = 60 * 1e3 
 const MIN_UP_RATE = 1 * 1e3
 
-const NUM_REQUESTS_PER_PEER = 2
+const NUM_REQUESTS_PER_PEER = 1 // 2
 const NUM_REQUESTS_TOTAL = 200
 const NUM_ACTIVE_PIECES = 50
 const MAX_NUM_OPT_UNCHOKE = 4
@@ -40,8 +42,20 @@ const MAX_NUM_MUTUAL_UNCHOKE = 12
 const OPT_LOOP_INTERVAL = 30 * 1e3
 const UNCHOKE_LOOP_INTERVAL = 10 * 1e3
 const SEED_LOOP_INTERVAL = 30 * 1e3
+const ANNOUNCE_LOOP_INTERVAL = 10 * 60 * 1e3
 
-LOG = true
+const DOWNLOAD_DIRECTORY = "./"
+
+LOG = false
+
+var createDirectory = (dirName) => {
+
+	if ( fs.existsSync(dirname) )
+		return true
+
+	fs.mkdirSync(dirname)
+
+}
 
 var byFreq2 = ( arrSet ) => {
 
@@ -701,12 +715,14 @@ Downloader.prototype.setMetaInfo = async function (info) {
 	fileMetaData.pieceLength = m['piece length']
 	fileMetaData.pieceHashes = m.pieces.toString('hex').match(/.{40}/g)
 
+	createDirectory(DOWNLOAD_DIRECTORY + "/" + fileMetaData.name)
+
 	if(m.length) {
 
 		fileMetaData.isDirectory = false
 		fileMetaData.fileLength = m.length
 		fileMetaData.fileLengthList = [fileMetaData.fileLength]
-		fileMetaData.path = "./" + fileMetaData.name
+		fileMetaData.path = "./" + fileMetaData.name + "/" + fileMetaData.name
 		fileMetaData.pathList = [ fileMetaData.path ]
 		if(LOG)
 			console.log('pathList', fileMetaData.pathList)
@@ -716,7 +732,7 @@ Downloader.prototype.setMetaInfo = async function (info) {
 		fileMetaData.isDirectory = true
 		fileMetaData.fileLengthList = m.files.map( pair => pair.length )
 		fileMetaData.fileLength = fileMetaData.fileLengthList.reduce( (sum, b) => sum + b, 0)
-		fileMetaData.pathList = m.files.map( pair => pair.path ).map( name => './' + name)
+		fileMetaData.pathList = m.files.map( pair => pair.path ).map( name => DOWNLOAD_DIRECTORY + "/" + fileMetaData.name + "/" + name)
 
 		if(LOG) {
 			console.log(fileMetaData.fileLength)
@@ -791,7 +807,7 @@ Downloader.prototype.leech = function() {
 
 	clearInterval(this.sLoop)
 	this.announceLoop()
-	this.annLoop = setInterval((this.announceLoop).bind(this), 300 * 1e3)
+	this.annLoop = setInterval((this.announceLoop).bind(this), ANNOUNCE_LOOP_INTERVAL )
 
 	let self = this 
 
@@ -833,7 +849,7 @@ Downloader.prototype.seed = function () {
 	//disconnect seeders
 
 	this.announceLoop()
-	this.annLoop = setInterval((this.announceLoop).bind(this), 300 * 1e3) 
+	this.annLoop = setInterval((this.announceLoop).bind(this), ANNOUNCE_LOOP_INTERVAL) 
 
 	this.on('new_peers', (this.optUnchokeLoop).bind(this))
 	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), OPT_LOOP_INTERVAL)
@@ -1040,7 +1056,7 @@ Downloader.prototype.downloadPiecelets = function() {
 		let rand = Math.random()
 		let randPeer = Array.from(peers)[Math.floor(rand) * peers.size]	
 
-		if( randPeer.requestList.length > 1 || !randReqToPeer(randPeer) ) //no more piecelets or more than 4 req
+		if( randPeer.requestList.length > NUM_REQUESTS_PER_PEER || !randReqToPeer(randPeer) ) //no more piecelets or more than 4 req
 			peers.delete(randPeer) 
 
 	}

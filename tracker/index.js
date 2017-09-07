@@ -4,6 +4,7 @@ const randomBytes = require('crypto').randomBytes
 const dns = require('dns')
 const request = require('request')
 const benDecode = require('bencode').decode
+http = require('http')
 
 const UDPRes = require('./UDPResponse.js')
 const AnnounceResp = UDPRes.AnnounceResp
@@ -57,8 +58,8 @@ class HTTPTracker {
 
 		var params = { 
 
-			info_hash: Buffer.from(this.file.infoHash,'hex').toString(), 
-			peer_id: Buffer.from(this.download.peerID, 'hex').toString(),
+			info_hash: Buffer.from(this.file.infoHash,'hex').toString('ascii'), 
+			peer_id: Buffer.from(this.download.peerID, 'hex').toString('ascii'),
 			port : port,
 			uploaded : this.download.stats.uploaded,
 			downloaded : this.download.stats.downloaded,
@@ -99,11 +100,10 @@ class HTTPTracker {
 		let self = this
 		new Promise( (resolve, reject) => {
 
-			timeout = setTimeout(() => { reject('http request timeout') } , self.default_timeout)
+			url = self.url + "?" + querystring.stringify(params)
 
-			request({url : self.url, qs : params}, (err, response, body) => {
+			request({url : url}, (err, response, body) => {
 
-				clearTimeout(timeout)
 				if(err)
 					reject(err)
 				else
@@ -216,11 +216,10 @@ UDPTracker.prototype.doAnnounce = async function(myPort) {
 	
 	this.transactID = randomBytes(4);
 
-	
-	if(!this.address)
-		this.address = await getAddr(this.host)
-
 	try {
+	
+		if(!this.address)
+			this.address = await getAddr(this.host)
 
 		let connReq = this._buildConnectReq()
 		connResp = await this._sendConnectRequest(connReq)
