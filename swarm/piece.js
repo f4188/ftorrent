@@ -7,11 +7,11 @@
 
 var fs = require('graceful-fs')
 
-var readStreamFunc = (path, start, end, file) => {
+var readStreamFunc = (start, len, file) => {
 
 	return new Promise( (resolve, reject) => {
 
-		file.read(start, end - start, function (err, buf) { 
+		file.read(start, len, function (err, buf) { 
 
 			if(err)
 				reject(err)
@@ -31,7 +31,7 @@ var writeStreamFunc = (start, buf, file) => {
 		file.write(start, buf, (err) => { 
 
 			if(err) 
-				reject("File error") 
+				reject(err) 
 			else 
 				resolve(true)
 
@@ -61,8 +61,8 @@ var Pieces = (file) => class Piece {
 
 	async readPiece() {
 
-		let start = 0, length = this.pieceLength 
-		return await this.readPiecelet(start, length)
+		let begin = 0, length = this.pieceLength 
+		return await this.readPiecelet(begin, length)
 
 	}
 
@@ -88,10 +88,11 @@ var Pieces = (file) => class Piece {
 
 				try {
 
-					let chunkletStart =  Math.max(start - bound[1], 0)
-					let chunkletEnd = Math.min( end, bound[2] )
+					let len = Math.min( end - start, bound[2] - start )	 -  Math.max( bound[1] - start, 0)
+					let chunkletStart =  Math.max(start - bound[1], 0) 
+					//let len = Math.min( end - start, bound[2] - start ) 
 
-					return await readStreamFunc(this.pathList[bound[0]], chunkletStart, chunkletEnd, this.files[bound[0]])
+					return await readStreamFunc(chunkletStart, len, this.files[bound[0]])
 
 				} catch (error) {
 
@@ -119,7 +120,6 @@ var Pieces = (file) => class Piece {
 			return this.good = false
 
 		let hash = crypto.createHash('sha1').update(buf).digest('hex')
-
 		return this.good = hash == this.hash
 
 	}
@@ -280,6 +280,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		} catch (error) {
 
+			console.log(error)
 			return false
 
 		}

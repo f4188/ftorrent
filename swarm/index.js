@@ -22,13 +22,24 @@ const Peer = PeerEx(UTMetaDataEx(_Peer))
 
 const MAX_NUM_PEERSTATS = 2000
 const SOFT_MIN_CONNECTIONS = 50
+const SOFT_MIN_INTERESTED = 35
+const SOFT_MIN_UNCHOKED = 15
 const HARD_MAX_CONNECTIONS = 100
+const SOFT_MAX_CONNECTIONS = 50
+const KEEP_ALIVE_INTERVAL = 30 * 1e3
+const PEER_CONNECT_TIMEOUT = 3 * 1e3
+const CONNECT_LOOP_INTERVAL = 60 * 1e3
+const PRUNE_IGNORE_TIME = 60 * 1e3 
+const MIN_UP_RATE = 1 * 1e3
 
 const NUM_REQUESTS_PER_PEER = 2
 const NUM_REQUESTS_TOTAL = 200
 const NUM_ACTIVE_PIECES = 50
 const MAX_NUM_OPT_UNCHOKE = 4
 const MAX_NUM_MUTUAL_UNCHOKE = 12
+const OPT_LOOP_INTERVAL = 30 * 1e3
+const UNCHOKE_LOOP_INTERVAL = 10 * 1e3
+const SEED_LOOP_INTERVAL = 30 * 1e3
 
 LOG = false
 
@@ -64,7 +75,7 @@ class Swarm extends EventEmitter {
 		this.fileMetaData = fileMetaData
 		this.download = download
 
-		this.defaultTimeout = 3 * 1e3
+		this.defaultTimeout = 3 * PEER_CONNECT_TIMEOUT
 		
 		this.myIP = myIP
 		this.myPort = myPort
@@ -154,11 +165,11 @@ class Swarm extends EventEmitter {
 
 		this.TCPserver = net.createServer(sockOpts, ( sock ) => {
 			
-		//	console.log("server connection", sock.remoteAddress, sock.remotePort)
 			self.pruneConnections(true)
 
 			if(self.connectMorePeersCond() > 0 && this.acceptServerConn)
 				self.makePeer(sock)
+			//else sock.end()
 
 		}).listen(this.myPort)
 
@@ -167,7 +178,7 @@ class Swarm extends EventEmitter {
 	start(seeding) {
 
 		this.seeding = seeding
-		this.connLoop = setInterval( (this.connectManager).bind(this), 60 * 1e3 )
+		this.connLoop = setInterval( (this.connectManager).bind(this), CONNECT_LOOP_INTERVAL )
 
 	}
 
@@ -188,7 +199,7 @@ class Swarm extends EventEmitter {
 		let self = this, seeding = this.seeding
 
 		//average rate to top five downloaders 
-		if(avail || (this.peers.size > 50  )) { //be liberal 
+		if(avail || (this.peers.size > SOFT_MAX_CONNECTIONS )) { //be liberal 
 
 			let fiveRate = this.peerStats.filter(x => x.status == 1).getArray().map( x => x.downRate ).sort( (s1, s2) => s2 - s1 ).slice(0, 10)
 			fiveRate = fiveRate.reduce( (sum, rate) => sum + rate, 0) / 10
@@ -198,9 +209,9 @@ class Swarm extends EventEmitter {
 				let stats = self.peerStats.get(peer.peerID)
 				let time = Date.now - stats.firstConnect
 
-				if(!seeding && time > 60 * 1e3  && stats.downRate < fiveRate / 5 ) //prune by percentile ?? 
+				if(!seeding && time > PRUNE_IGNORE_TIME  && stats.downRate < fiveRate / 5 ) //prune by percentile ?? 
 					peer.sock.end()
-				if(seeding && time > 60 * 1e3 && stats.upRate < 1e3) 
+				if(seeding && time > PRUNE_IGNORE_TIME && stats.upRate < MIN_UP_RATE && peer.interested) 
 					peer.sock.end()
 
 			})
@@ -257,7 +268,7 @@ class Swarm extends EventEmitter {
 
 	connectMorePeersCond () {
 
-		return Math.max(50 - this.peers.size, 15 - this.amUnchokedPeers.size, 25 - this.aInterestedPeers.size, 0)
+		return Math.max(SOFT_MIN_CONNECTIONS - this.peers.size, 15 - this.amUnchokedPeers.size, 25 - this.aInterestedPeers.size, 0)
 	
 	}
 
@@ -338,7 +349,7 @@ class Swarm extends EventEmitter {
 
 		this.connectManager()
 
-		if(this.peerStats.size > 2000) {
+		if(this.peerStats.size > MAX_NUM_PEERSTATS) {
 			//sort by oldest first connect - kill never connected
 			//kill zero download if leeching or zero upload if seeding
 			//kill slow peers
@@ -608,6 +619,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 							
 			if(self.pieces.size == self.fileMetaData.numPieces) {
 				self.seeding = true
+				//self.fileMetaData.files.forEach( (file) => file.end() )
 				self.seed()	
 				return	
 			} 
@@ -723,6 +735,7 @@ Downloader.prototype.setMetaInfo = async function (info) {
 
 	if(LOG)
 		console.log('Have', Math.floor(this.pieces.size / this.fileMetaData.numPieces * 100), "% of pieces.")
+
 	this.seeding = this.pieces.size == fileMetaData.numPieces
 	return this.seeding
 
@@ -753,7 +766,7 @@ Downloader.prototype.stop = function() {
 		clearInterval(this.unchokeLoop)
 		this.optLoop = null
 
-		clearInterval(this.swarm.connectManager)
+		clearInterval(this.swarm.connLoop)
 		this.swarm.acceptServerConn = false
 		let peers = this.swarm.peers
 		this.swarm.peers.forEach( peer => peer.sock.end())
@@ -790,10 +803,10 @@ Downloader.prototype.leech = function() {
 	this.swarm.on('peer_choked', updateActivePieces )
 
 	this.swarm.on('peer_interested', (this.optUnchokeLoop).bind(this))
-	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), 30 * 1e3)
+	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), OPT_LOOP_INTERVAL)
 	this.swarm.on('peer_interested', (this.unchokeLoop).bind(this))
 	this.swarm.on('peer_unchoked', (this.unchokeLoop).bind(this))
-	this.uLoop = setInterval((this.unchokeLoop).bind(this), 10 * 1e3)
+	this.uLoop = setInterval((this.unchokeLoop).bind(this), UNCHOKE_LOOP_INTERVAL)
 
 	this.on('recieved_piece', (this.downloadPieces).bind(this))
 	this.on('recieved_piecelet', (this.downloadPiecelets).bind(this))
@@ -814,10 +827,10 @@ Downloader.prototype.seed = function () {
 	this.annLoop = setInterval((this.announceLoop).bind(this), 300 * 1e3) 
 
 	this.on('new_peers', (this.optUnchokeLoop).bind(this))
-	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), 30 * 1e3)
+	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), OPT_LOOP_INTERVAL)
 
 	this.on('new_peers', (this.seedLoop).bind(this))
-	this.sLoop = setInterval((this.seedLoop).bind(this), 30 * 1e3)
+	this.sLoop = setInterval((this.seedLoop).bind(this), SEED_LOOP_INTERVAL)
 
 }
 

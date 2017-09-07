@@ -1,13 +1,9 @@
 
-//EXTENDED_MSG_TYPE
 const EXTENDED_MSG_TYPE = 20 
 const PEEREX_MSG_TYPE = 2
 
 const benEncode = require('bencode').encode
 const PeerInfo = require('../lib/PeerInfo.js').PeerInfo
-//const parsePeerContactInfosIP4 = require('../lib/PeerInfo.js').parsePeerContactInfos
-
-//f = fs.createWriteStream('./peerexlog.log')
 
 var PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 	
@@ -21,9 +17,6 @@ var PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 	}
 
 	pPeerExchange (args) {
-
-
-		//f.write( JSON.stringify(Date.now()) +JSON.stringify(args))
 
 		let {added, added6, dropped, dropped6} = args
 		let addedf = args['added.f'], added6f = args['added6.f']

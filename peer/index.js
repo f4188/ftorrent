@@ -71,7 +71,7 @@ function Peer(fileMetaData, download, sock, checkID, parser) {
 	this.sock.on('close', _handleDisconnect)
 	this.sock.on('error', _handleDisconnect)
 
-	this.msgHandlers = { '_handshake': (this._pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
+	this.msgHandlers = { '_keepalive' : (this._pKeepalive).bind(this), '_handshake': (this._pHandshake).bind(this), [KEEPALIVE_MSG_TYPE] : (this.pKeepAlive).bind(this), 
 		[CHOKE_MSG_TYPE] : (this._pChoke).bind(this), [UNCHOKE_MSG_TYPE] : (this._pUnchoke).bind(this), 
 		[INTERESTED_MSG_TYPE] : (this._pInterested).bind(this), [UNINTERESTED_MSG_TYPE] : (this._pUninterested).bind(this), 
 		[HAVE_MSG_TYPE] : (this._pHave).bind(this), [BITFIELD_MSG_TYPE] : (this._pBitfield).bind(this), 
@@ -92,6 +92,10 @@ function Peer(fileMetaData, download, sock, checkID, parser) {
 }
 
 util.inherits(Peer, Duplex)
+
+Peer.prototype._pKeepalive = function() {
+	//reset keepalive timer
+}
 
 Peer.prototype.piece = function(index, begin, piece) {
 
