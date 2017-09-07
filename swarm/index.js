@@ -481,7 +481,7 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 	this.annLoop = null
 
 	this.announceUrlList = []
-	this.trackers = []
+	this.trackers = {}
 
 	this.trackerless = false
 	this.dht = null
@@ -587,11 +587,10 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 	}]	
 
-	this.swarm.listeners['peer_piece'] = [(peer, index, begin, piecelet) => { 
+	this.swarm.listeners['peer_piece'] = [async (peer, index, begin, piecelet) => { 
 
 		if(!self.activePieces.has(index))
 			return
-
 		
 		let pos = peer.requestList.findIndex( req => req.index == index && req.begin == begin && req.length == piecelet.length)
 		
@@ -601,9 +600,8 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 		let piece = self.activePieces.get(index)
 		piece.add(index, begin, piecelet)
 
-		if(piece.isComplete && piece.assemble()) {
+		if(piece.isComplete && await piece.assemble()) {
 			
-		//	console.log(Math.floor(self.pieces.size / self.fileMetaData.numPieces * 100), '% | Got piece:', index, "|" ,peer.peerID)
 			self.activePieces.delete(index)
 			self.pieces.set(index, new self.Piece(index))
 			self.swarm.havePiece(index)
@@ -640,9 +638,11 @@ Downloader.prototype.setMetaInfoFile = async function (metaInfoFilePath) {
 	this.trackerless = ! (announceList || announce)
 	
 	if(!this.trackerless) {
+
 		this.fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
 		if(announceList)
 			this.fileMetaData.announceUrlList = this.fileMetaData.announceUrlList.concat( announceList.map( url => url[0].toString()) )
+
 	}
 	
 	fileMetaData.metaInfoRaw = info
@@ -761,6 +761,8 @@ Downloader.prototype.stop = function() {
 		this.swarm.peers.clear()
 		this.activePieces.clear()
 
+		this.trackers = {}
+
 }
 
 Downloader.prototype.leech = function() {
@@ -787,13 +789,10 @@ Downloader.prototype.leech = function() {
 	this.swarm.on('peer_disconnected', updateActivePieces )	
 	this.swarm.on('peer_choked', updateActivePieces )
 
-	//this.on('new_peers', (this.optUnchokeLoop).bind(this))
 	this.swarm.on('peer_interested', (this.optUnchokeLoop).bind(this))
 	this.optLoop = setInterval((this.optUnchokeLoop).bind(this), 30 * 1e3)
-	//this.on('new_peers', (this.unchokeLoop).bind(this))
 	this.swarm.on('peer_interested', (this.unchokeLoop).bind(this))
 	this.swarm.on('peer_unchoked', (this.unchokeLoop).bind(this))
-	//this.swarm.on()
 	this.uLoop = setInterval((this.unchokeLoop).bind(this), 10 * 1e3)
 
 	this.on('recieved_piece', (this.downloadPieces).bind(this))
@@ -803,7 +802,6 @@ Downloader.prototype.leech = function() {
 
 	this.swarm.on('new_pieces', (this.downloadPieces).bind(this)) //aInterested
 	this.swarm.on('peer_unchoked', (this.downloadPieces).bind(this)) //amUnChoked
-	//this.swarm.on('peer_choked', (this.downloadPieces).bind(this)) //kill - taken care of by updateActivePieces
 
 }
 
@@ -1072,7 +1070,7 @@ Downloader.prototype.announce = async function() {
 			else if (u.protocol == 'http:')
 				tracker = new HTTPTracker(this.fileMetaData, this.download, u)
 
-			this.trackers.push(tracker)
+			this.trackers[u.href] = tracker
 
 		}
 		

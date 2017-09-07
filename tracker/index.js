@@ -49,6 +49,7 @@ class HTTPTracker {
 		this.interval = null
 		this.default_timeout = 3000
 		this.online = true
+		this.timeout = null
 
 	}
 
@@ -74,8 +75,6 @@ class HTTPTracker {
 			decodedResp = benDecode(resp) 
 
 		} catch (error) {
-
-		//	console.log(error)
 			
 			return {}
 
@@ -98,13 +97,14 @@ class HTTPTracker {
 
 	request (params) {
 
+		let self = this
 		new Promise( (resolve, reject) => {
 
-			let timeout = setTimeout(() => { reject('timeout') } , this.default_timeout)
+			self.timeout = setTimeout(() => { reject('timeout') } , self.default_timeout)
 
-			request({url : this.url, qs : params}, function(err, response, body) {
-				//console.log('response',response)
-				//console.log('body', body)
+			request({url : self.url, qs : params}, function(err, response, body) {
+
+				clearTimeout(self.timeout)
 				if(err)
 					reject(body)
 				else

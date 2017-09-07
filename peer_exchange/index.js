@@ -7,7 +7,7 @@ const benEncode = require('bencode').encode
 const PeerInfo = require('../lib/PeerInfo.js').PeerInfo
 //const parsePeerContactInfosIP4 = require('../lib/PeerInfo.js').parsePeerContactInfos
 
-f = fs.createWriteStream('./peerexlog.log')
+//f = fs.createWriteStream('./peerexlog.log')
 
 var PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 	
@@ -23,7 +23,7 @@ var PeerEx  = (SuperClass) => class PeerEx extends SuperClass {
 	pPeerExchange (args) {
 
 
-		f.write( JSON.stringify(Date.now()) +JSON.stringify(args))
+		//f.write( JSON.stringify(Date.now()) +JSON.stringify(args))
 
 		let {added, added6, dropped, dropped6} = args
 		let addedf = args['added.f'], added6f = args['added6.f']
