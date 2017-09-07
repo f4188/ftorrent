@@ -41,7 +41,7 @@ const OPT_LOOP_INTERVAL = 30 * 1e3
 const UNCHOKE_LOOP_INTERVAL = 10 * 1e3
 const SEED_LOOP_INTERVAL = 30 * 1e3
 
-LOG = false
+LOG = true
 
 var byFreq2 = ( arrSet ) => {
 
@@ -196,6 +196,9 @@ class Swarm extends EventEmitter {
 	//called periodically and also when new peers available
 	pruneConnections(avail) { //prunes idle or bad peers - peers that never unchoke despite interest - slow peers 
 
+		if(LOG)
+			console.log("Prune connections")
+
 		let self = this, seeding = this.seeding
 
 		//average rate to top five downloaders 
@@ -233,6 +236,9 @@ class Swarm extends EventEmitter {
 				self.peers.add(peer)
 
 			} catch (error) {
+
+				if(LOG)
+					console.log(error)
 
 			}
 
@@ -337,6 +343,9 @@ class Swarm extends EventEmitter {
 	}
 
 	addPeers (addrs) {
+
+		if(LOG)
+			console.log("Connecting peers:", addrs)
 
 		addrs = addrs.filter(addrs => Array.from(this.peers).every(oPeer => oPeer.port != addrs.port && oPeer.host != addrs.host))
 		
@@ -1040,6 +1049,9 @@ Downloader.prototype.downloadPiecelets = function() {
 
 Downloader.prototype.addPeers = function(peers) {
 
+	if(LOG)
+		console.log("downloader addPeers")
+
 	peers = peers.map( (tuple) => { return { host : tuple.ip, port : tuple.port } } )
 	this.swarm.addPeers(peers)
 
@@ -1075,41 +1087,55 @@ Downloader.prototype.announce = async function() {
 		let u = new url.URL(announceUrl)
 		let resp, tracker = this.trackers[u.href]
 
-		if(!tracker) {
 
-			if(u.protocol == 'udp:')	
-				tracker = new UDPTracker(u, infoHash, Buffer.from(peerID,'hex'), this.download.stats)
-				
-			else if (u.protocol == 'http:')
-				tracker = new HTTPTracker(this.fileMetaData, this.download, u)
-
-			this.trackers[u.href] = tracker
-
-		}
-		
 		try {
+
+			if(LOG)
+				console.log("Announcing:", u.protocol, u.href)
+
+			if(!tracker) {
+
+				if(u.protocol == 'udp:') {
+					if(LOG) console.log('UDP ANNOUNCE')
+					tracker = new UDPTracker(u, infoHash, Buffer.from(peerID,'hex'), this.download.stats)
+				}
+					
+				else if (u.protocol == 'http:') {
+					if(LOG) console.log("HTTP announce")
+					tracker = new HTTPTracker(this.fileMetaData, this.download, u)
+				}
+
+				this.trackers[u.href] = tracker
+
+			}
 
 			resp = await tracker.doAnnounce(this.myPort)
 			let { numLeechers, numSeeders, interval, peerList } = resp
 
-			this.addPeers(peerList || [])
+			peerList = peerList || []
+			this.addPeers(peerList)
 
 			if(LOG) {
 				console.log("Tracker:", announceUrl)
 				console.log("leechers:", numLeechers)
 				console.log('seeders:', numSeeders)
-				console.log('peers returned:', peerList && peerList.length)
+				console.log('peers returned:', peerList.length)
 			}
 
 		} catch(error) {
 
-		//	console.log(error)
+			console.log(error)
 
 		} 
 
 	}).bind(this)
 
-	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err, callback) {})
+	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err, callback) {
+
+		if(LOG && err)
+			console.log(err)
+
+	})
 
 }
 

@@ -74,22 +74,21 @@ class HTTPTracker {
 			resp = await this.request(params)
 			decodedResp = benDecode(resp) 
 
+			let {interval, peers, complete, incomplete} = decodedResp || {}
+			this.interval = interval
+
+			return {
+
+				'numLeechers' : incomplete || 0,
+				'numSeeders' : complete || 0,
+				'interval' : this.interval || 600 * 1e3,
+				'peerList' : this.peers || []
+
+			}
+
 		} catch (error) {
 			
 			return {}
-
-		}
-		
-		
-		let {interval, peers, complete, incomplete} = decodedResp || {}
-		this.interval = interval
-
-		return {
-
-			'numLeechers' : incomplete || 0,
-			'numSeeders' : complete || 0,
-			'interval' : this.interval || 600 * 1e3,
-			'peerList' : this.peers || []
 
 		}
 
@@ -100,13 +99,13 @@ class HTTPTracker {
 		let self = this
 		new Promise( (resolve, reject) => {
 
-			self.timeout = setTimeout(() => { reject('timeout') } , self.default_timeout)
+			timeout = setTimeout(() => { reject('http request timeout') } , self.default_timeout)
 
-			request({url : self.url, qs : params}, function(err, response, body) {
+			request({url : self.url, qs : params}, (err, response, body) => {
 
-				clearTimeout(self.timeout)
+				clearTimeout(timeout)
 				if(err)
-					reject(body)
+					reject(err)
 				else
 					resolve(body)
 
