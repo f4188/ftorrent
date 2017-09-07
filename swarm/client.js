@@ -50,6 +50,7 @@ class Client {
 
 		this.torrents.push(downloader)
 		this.file = this.magnetURI = null
+
 		this.screenFunc = this.displayStatus
 		this.args = [this.torrents.length - 1]
 		this.idx = this.torrents.length - 1
@@ -137,6 +138,7 @@ class Client {
 	async app() {
 
 		term.fullscreen(true)
+		term.windowTitle("fztorrent")
 		term.hideCursor()
 
 		this.file = null
@@ -145,6 +147,7 @@ class Client {
 		this.idx = null
 		this.args = []
 		this.noRefresh = false
+		this.lastScreen = null
 
 		this.opts = [" New Torrent", "List Torrents", "Start", "Stop", "Peers", "Log", "Pieces", "Settings", "Exit"]
 		this.optScreens = [ this.linkOrFile, this.displayTorrents, 
@@ -329,7 +332,7 @@ class Client {
 
 		return new Promise( (resolve, reject) => {
 
-			term.singleLineMenu( actions , {y : term.height-1 , separator : " | ", exitOnUnexpectedKey : true},  function( error , response ) {
+			term.singleLineMenu( actions , { y : term.height-1 , separator : " | ", exitOnUnexpectedKey : true},  function( error , response ) {
 				
 				if(error)
 					reject(error)
@@ -339,9 +342,10 @@ class Client {
 
 				} else {
 
-					if( response.selectedIndex >= 2 && response.selectedIndex <= 6 )
+					if( self.lastScreen != self.displayStatus &&  response.selectedIndex >= 2 && response.selectedIndex <= 6 )
 						return resolve(null)
 
+					self.lastScreen = self.screenFunc
 					self.screenFunc = self.optScreens[response.selectedIndex]
 					resolve(null)
 
@@ -378,7 +382,7 @@ class Client {
 				let str = ((i++).toString().padStart(2)) + ". " + address 
 				return str.padEnd( term.width/2 - 20 )+ "  dl: " + dSpeed + " ul: " + uSpeed
 
-			})
+			}).slice(0, term.height - 5)
 
 			if(items.length == 0)
 				return resolve(null)
@@ -406,6 +410,7 @@ class Client {
 
 		let self = this
 		let idx = this.idx
+		this.lastScreen = this.displayStatus
 
 		return new Promise( async (resolve, reject) => {
 			
@@ -427,7 +432,7 @@ class Client {
 			term.nextLine(1)
 			term.right(1).bold("Have metadata: " + this.torrents[idx].fileMetaData.ready + "   ")
 			term.nextLine(1)
-			term.right(1).bold("File length: " + this.torrents[idx].fileMetaData.fileLength)
+			term.right(1).bold("File length: " + this.torrents[idx].fileMetaData.fileLength + " (bytes)")
 			term.nextLine(1)
 			term.right(1).bold("Piece length: " + this.torrents[idx].fileMetaData.pieceLength + " (bytes)")
 			term.nextLine(1)
@@ -460,7 +465,10 @@ class Client {
 			term.right(1).green(repeat("=", (term.width - 3) * progress / 100)).green( progress ? ">" : "")
 			term.nextLine(1)
 			term.right(1).bold( "Download rate: " + Math.round(tor.swarm.globalDownRate / 100)/10 + " KB/s    ") 	
+			term.nextLine(1)
 
+			var timeLeft = (tor.fileMetaData.numPieces - tor.pieces.size) * tor.fileMetaData.pieceLength / tor.swarm.globalDownRate
+			term.right(1).bold( "ETA: " + (Math.floor(timeLeft / 60 / 60) + "hrs " + Math.floor(timeLeft / 60) % 60 + "mins " + Math.round(timeLeft % 60) + "secs      ")  )
 			term.nextLine(1)
 			term.right(1).bold( "Upload rate: " + Math.round(tor.swarm.globalUpRate / 100)/10 + " KB/s    ")
 			term.nextLine(1)
@@ -485,6 +493,7 @@ class Client {
 				this.args = []
 				this.noRefresh = false
 				this.screenFunc = this.actionBar
+
 				resolve(null) 
 			
 			})

@@ -166,7 +166,7 @@ class DHT {
 					node = bucket.nodeIDs[rand]
 				}
 
-				this.findNodeIter(node).then( x=> { }).catch( err => console.log("Refresh:", err))	 //dump nodes not in DHT
+				this.findNodeIter(node).then( x=> { }).catch( err => {if(LOG) console.log("Refresh:", err)} )	 //dump nodes not in DHT
 			}
 
 		})
@@ -335,7 +335,9 @@ class DHT {
 				} 
 	
 				queriedNodes.add(task.id)
-				console.log("query:", task.id)
+
+				if(LOG)
+					console.log("query:", task.id)
 
 				try {
 
@@ -405,7 +407,7 @@ class DHT {
 
 				}
 
-				if((Date.now() - startTime) > 3 * 60 * 1e3  || kClosestCount > 1000 || kClosestCount >= 8 && allPeers.length > 0 
+				if((Date.now() - startTime) > 30 * 1e3  || kClosestCount > 15 || kClosestCount >= 8 && allPeers.length > 0 
 					|| allPeers.length > 50 || allNodes.difference(queriedNodes).size == 0 && pQueue.idle())
 					return true
 
@@ -424,7 +426,8 @@ class DHT {
 					return
 				}
 				
-				console.log('query:', task.id)
+				if(LOG)
+					console.log('query:', task.id)
 
 				try {
 
@@ -563,7 +566,8 @@ class DHT {
 						try {
 
 							let ms = await map.get(aQuesNodeID).ping()
-							if(LOG) console.log("Pinged:", aQuesNodeID, "| rtt:", ms )
+							if(LOG) 
+								console.log("Pinged:", aQuesNodeID, "| rtt:", ms )
 							
 						} catch (error) {
 
@@ -628,7 +632,9 @@ class DHT {
 
 			let node = this._getNode(this.makeNode(queryNodeID, rinfo.port, rinfo.address)) //if id in dht returns existing node
 			node.resetQueryTimer()
-			console.log(request)
+
+			if(LOG)
+				console.log(request)
 
 			switch(request.q.toString()) {
 				case 'ping' :

@@ -1,8 +1,8 @@
 
 /*
- * Pieces object that reads and writes piecelets
- * A piece object with a verify method
- * An active piece object as here
+ * Pieces objects that read and write piecelets
+ * A piece object with read and verify methods
+ * An active piece object with isComplete, assemble, write methods
 */
 
 var fs = require('graceful-fs')

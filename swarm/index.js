@@ -43,6 +43,8 @@ const OPT_LOOP_INTERVAL = 30 * 1e3
 const UNCHOKE_LOOP_INTERVAL = 10 * 1e3
 const SEED_LOOP_INTERVAL = 30 * 1e3
 const ANNOUNCE_LOOP_INTERVAL = 10 * 60 * 1e3
+const ENABLE_DHT = false
+const DHT_PORT = 6881
 
 const DOWNLOAD_DIRECTORY = "./"
 
@@ -50,10 +52,10 @@ LOG = false
 
 var createDirectory = (dirName) => {
 
-	if ( fs.existsSync(dirname) )
+	if ( fs.existsSync(dirName) )
 		return true
 
-	fs.mkdirSync(dirname)
+	fs.mkdirSync(dirName)
 
 }
 
@@ -519,8 +521,8 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 
 	this.trackerless = false
 	this.dht = null
-	this.dhtPort = 6881
-	this.enableDHT = false
+	this.dhtPort = DHT_PORT
+	this.enableDHT = ENABLE_DHT
 	this.dht = null
 	
 	this.requests = []
