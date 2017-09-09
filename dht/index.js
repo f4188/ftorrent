@@ -215,7 +215,7 @@ class DHT {
 		DHTData.buckets.forEach( bucket => { self.buckets.push( new Bucket(bucket.min, bucket.max)) })
 		DHTData.buckets.forEach(bucket => bucket.nodeIDs.forEach( id => self.makeNode(id, DHTData.addressBook[id].port, DHTData.addressBook[id].host)) )
 
-		this.refreshBuckets(true)
+		this.refreshBuckets(true) //async
 		this.refreshLoop = setInterval((this.refreshBuckets).bind(this), 15 * 60 * 1e3)
 
 

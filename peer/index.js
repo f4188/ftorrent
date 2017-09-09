@@ -330,8 +330,8 @@ Peer.prototype._handshake = function() {
 	//only check extension supported by this client
 	buf.writeUInt8(0x10, 25) 
 	buf.writeUInt8(0x01, 27)
-	this.push(buf)
 
+	this.push(buf)
 	this.exHandShake()
 	this.bitfield()
 

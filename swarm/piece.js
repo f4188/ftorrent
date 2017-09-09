@@ -181,7 +181,10 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	add(index, start, piecelet) {
 
 		let left = start, right = left + piecelet.length
+
 		this.piecelets.set(left + "," + right, piecelet)
+		//this.piecelets.set('left+",'+right, ---)
+		//this.writePiecelet(left, piecelet)
 		
 		let request = this.requestList.get(start + "," + (start + piecelet.length))
 		request.dispatched = 2
@@ -230,6 +233,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			let interval = lefts.find( k => k.split(',')[1] == maxRight )
 
 			let piecelet = this.piecelets.get(interval)
+			//pieclet = this.readPiecelet(...interval.split(",").map(x => Number(x)))
 			piecelet.copy(buf, Number(interval.split(',')[0]), 0, piecelet.length)
 
 			left = maxRight
@@ -301,8 +305,13 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	randPieceletReq(peer) {
 
 		let self = this, idx = 0, req
+		//this.arr = this.requestList.values()
 		let arr = Array.from(this.requestList.values()) //too slow
 
+		//let req = this.arr.next()
+		//if(this.dispatchList.has(req.begin + "," + (req.begin + req.length))) loop
+		//this.dispatchList.set(req.begin + "," + (req.begin+ req.length), req)
+		//reset arr if no more elems but missing piecelets
 		for( ; idx < arr.length; idx ++ ) {
 			if(arr[idx].dispatched == 0) { //this.dispatchList.has(arr[idex].begin + "," + (arr[idx].begin + arr[idx.length]) )
 				req = arr[idx]

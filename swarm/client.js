@@ -18,11 +18,34 @@ term = require('terminal-kit').terminal
 clipboardy = require('clipboardy')
 Downloader = require('./index.js').Downloader
 
+var repeat = (char, num) => { let str = ""; while(num --> 0) str += char; return str}
+
+
+var Torrent = (downloader) => {
+
+	let file = downloader.fileMetaData
+	let dL = downloader.download
+
+	return {
+
+		ready : file.ready,
+		numPieces : file.numPieces,
+		pieces : dl.pieces.size,
+
+
+		start : () => {},
+		stop : () => {}
+
+	}
+
+}
+
 class Client {
 
-	constructor() {
+	constructor(dht) {
 
 		this.port = 6000
+		this.dht = dht
 		this.torrents = []
 		
 	}
@@ -33,7 +56,9 @@ class Client {
 		term.down(1).right(1).bold('Reading torrent file...')
 
 		this.args = []
-		let downloader = new Downloader(++this.port) //need listen port
+		let downloader = new Downloader(++this.port, null, this.dht) //need listen port
+		if(this.dht)
+			downloader.enableDHT = true
 
 		try {
 
@@ -135,6 +160,39 @@ class Client {
 
 	}
 
+	displayDHT() {
+
+		return new Promise( (resolve, reject) => {
+
+			var repeat = (char, num) => { let str = ""; while(num --> 0) str += char; return str}
+
+			term.clear()
+			term.blue(repeat("=", term.width)).nextLine(1)
+
+			term.right(1).white("This node id:" + this.dht.myNodeID + " | Nodes discovered: " + this.dht.nodes.size + " | Buckets: " + this.dht.buckets.length)
+			term.nextLine(1)
+			term.blue(repeat("=", term.width))
+			term.nextLine(1)
+
+			let buckets = this.dht.buckets
+			buckets.sort( (b1, b2) => b1.min - b2.min)
+			buckets.forEach( (bucket, i) => {
+
+				term.right(1).white( (i).toString().padStart(2) + ". "+ "Min: " + bucket.min + " ~ Max: " + bucket.max).nextLine(1)
+				term.right(1+4).cyan( "[" +bucket.nodeIDs.map( nodeID => nodeID.slice(0, 20)) + "]").nextLine(1) 
+
+			})
+
+			term.once('key', () => { 
+
+				this.screenFunc = this.displayStatus
+				resolve(null) 
+				
+			})
+
+		})
+	}
+
 	async app() {
 
 		term.fullscreen(true)
@@ -145,11 +203,11 @@ class Client {
 		this.magnetURI = null
 		this.screenFunc = this.displayTorrents
 		this.idx = null
-		this.args = []
+		this.args = [] //kill
 		this.noRefresh = false
 		this.lastScreen = null
 
-		this.opts = [" New Torrent", "List Torrents", "Start", "Stop", "Peers", "Log", "Pieces", "Settings", "Exit"]
+		this.opts = [" New Torrent", "List Torrents", "Start", "Stop", "Peers", "Log", "Pieces", "Delete", "DHT", "Settings", "Exit"]
 		this.optScreens = [ this.linkOrFile, this.displayTorrents, 
 
 		() => { 
@@ -165,7 +223,11 @@ class Client {
 			this.args = []; this.screenFunc = this.displayStatus 
 		},  
 
-		this.displayPeers, this.log, this.displayPieces, this.settings, null]
+		this.displayPeers, this.log, this.displayPieces, 
+
+		() => { this.torrents[this.idx].stop(); this.torrents.splice(this.idx, 0); this.screenFunc = this.displayTorrents  }, 
+		
+		this.displayDHT, this.actionBar, null]
 
 
 		try {
@@ -356,6 +418,28 @@ class Client {
 		})
 	}
 
+	async displayPeerPieces() {
+
+		let self = this
+
+		return new Promise( (resolve, reject) => {
+
+			term.clear().down(1).right(1).cyan(self.peer.pieces.size).right(1).cyan(self.peer.fileMetaData.numPieces).nextLine(1)
+
+			term.white(Array.from(self.peer.pieces))
+
+			term.once('key', (name) => { 
+
+				self.noRefresh = false
+				self.screenFunc = self.displayStatus
+				resolve(null) 
+			
+			})
+
+		})
+
+	}
+
 	async displayPeers() {
 
 		let self = this
@@ -371,7 +455,7 @@ class Client {
 
 			this.noRefresh = true
 			var refresh = () => { resolve(null) }
-			var t = setTimeout( refresh , 1 * 1e3)
+			var t = setTimeout( refresh , 10 * 1e3)
 
 			let i = 0
 			let items = Array.from(this.torrents[this.idx].swarm.peers).map( (peer) => { 
@@ -380,9 +464,9 @@ class Client {
 				let dSpeed = Math.round(stats.get(peer.peerID).downRate / 100)/10 + " KB/s"
 				let uSpeed = Math.round(stats.get(peer.peerID).upRate / 100)/10 + " KB/s"
 				let str = ((i++).toString().padStart(2)) + ". " + address 
-				return str.padEnd( term.width/2 - 20 )+ "  dl: " + dSpeed + " ul: " + uSpeed
+				return [ str.padEnd( 20 ) + "| dl: " + dSpeed + " ul: " + uSpeed, peer ]
 
-			}).slice(0, term.height - 5)
+			})//.slice(0, term.height - 5)
 
 			if(items.length == 0)
 				return resolve(null)
@@ -390,7 +474,7 @@ class Client {
 			let title = "Connected peers"
 			let escMsg = "Any key to return"
 			term.clear().down(1).right(1).bold( title.padEnd(term.width - escMsg.length - 2) + escMsg)
-			term.singleColumnMenu( items, { y : 4, exitOnUnexpectedKey : true, selectedStyle : term}, async function( error , response ) {
+			term.gridMenu( items.map(x => x[0]), { y : 4, exitOnUnexpectedKey : true, itemMaxWidth : term.width / 2,selectedStyle : term.white, style : term.cyan}, async function( error , response ) {
 					
 				self.noRefresh = false
 				clearTimeout(t)
@@ -398,8 +482,18 @@ class Client {
 				if(error) 
 					reject(error)
 
-				self.screenFunc = self.displayStatus
-				resolve(null)
+				if(response.unexpectedKey) {
+
+					self.screenFunc = self.displayStatus
+					resolve(null)
+
+				} else {
+					
+					self.peer = items[response.selectedIndex][1]
+					self.screenFunc = self.displayPeerPieces
+					resolve(null)
+
+				}
 
 			})	
 
@@ -423,11 +517,19 @@ class Client {
 
 			let title = "Name:"
 			let escMsg = "Any key for actions"
-			term.down(1).right(1).bold(title + " " + this.torrents[idx].fileMetaData.name).move(term.width - title.length - escMsg.length - this.torrents[idx].fileMetaData.name.length- 3).bold(escMsg)
+
+			var repeat = (char, num) => { let str = ""; while(num --> 0) str += char; return str}
+
+
+			term.blue(repeat("=", term.width)).nextLine(1)
+
+			term.right(1).cyan(title + " " + this.torrents[idx].fileMetaData.name).move(term.width - title.length - escMsg.length - this.torrents[idx].fileMetaData.name.length- 3).bold(escMsg)
+
+			term.blue(repeat("=", term.width)).nextLine(1)
 
 			let tor = this.torrents[idx]
 			//term.green(this.torrents[idx].fileMetaData.name)
-			term.nextLine(2)
+			term.nextLine(1)
 			term.right(1).bold("Info hash: " + this.torrents[idx].fileMetaData.infoHash.toString('hex'))
 			term.nextLine(1)
 			term.right(1).bold("Have metadata: " + this.torrents[idx].fileMetaData.ready + "   ")
@@ -453,7 +555,7 @@ class Client {
 			term.nextLine(1)
 			term.right(1).bold("Unchoking: " + tor.swarm.unchokedPeers.size + "  ")
 			term.nextLine(1)
-			term.right(1).bold("Interested peers: " + tor.swarm.amInterestedPeers.size + "  ")
+			term.right(1).bold("Peers interested: " + tor.swarm.amInterestedPeers.size + "  ")
 			term.nextLine(1)
 			term.right(1).bold("Peers unchoking: " + tor.swarm.amUnchokedPeers.size + "  ")
 
@@ -561,8 +663,23 @@ if( require.main == module) {
 
 	if(argv.ui || argv.u) {
 
-		client = new Client()
-		client.app().catch(x => console.log(x))
+		let dht = null
+		if(argv.d) {
+			DHT = require('../dht/index.js').DHT
+			dht = new DHT(10000, "")
+
+			dht.bootstrap().then( () => {
+				client = new Client(dht)
+				client.app().catch(x => console.log(x))
+
+			}).catch(x => console.log(x))
+
+		} else {
+
+			client = new Client()
+			client.app().catch(x => console.log(x))
+		
+		}
 
 	} else {
 
@@ -570,7 +687,7 @@ if( require.main == module) {
 
 			let port = argv.p || argv.port
 
-			client = new Downloader(port || 9000)
+			client = new Downloader(port || 9000, null)//, dht)
 
 			let file = argv.f || argv.file 
 
@@ -612,6 +729,10 @@ if( require.main == module) {
 
 		try {
 		
+
+		//download/seed/create new .torrent/magnetUri/metaData
+		//download folder/file select
+		//port/announceurl
 			startup() 
 		
 		} catch (error) {

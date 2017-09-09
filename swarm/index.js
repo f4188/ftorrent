@@ -44,7 +44,7 @@ const UNCHOKE_LOOP_INTERVAL = 10 * 1e3
 const SEED_LOOP_INTERVAL = 30 * 1e3
 const ANNOUNCE_LOOP_INTERVAL = 10 * 60 * 1e3
 const ENABLE_DHT = false
-const DHT_PORT = 6881
+const DHT_PORT = 8000
 
 const DOWNLOAD_DIRECTORY = "./"
 
@@ -503,7 +503,7 @@ class Swarm extends EventEmitter {
 
 }
 
-function Downloader(myPort, peerID) { //extends eventEmitter
+function Downloader(myPort, peerID, dht) { //extends eventEmitter
 
 	EventEmitter.call(this)
 
@@ -520,10 +520,10 @@ function Downloader(myPort, peerID) { //extends eventEmitter
 	this.trackers = {}
 
 	this.trackerless = false
-	this.dht = null
+	this.dht = dht
 	this.dhtPort = DHT_PORT
 	this.enableDHT = ENABLE_DHT
-	this.dht = null
+	//this.dht = null
 	
 	this.requests = []
 
@@ -906,7 +906,7 @@ Downloader.prototype.optUnchokeLoop = function() {
 		let swarm = this.swarm, peerMap = this.swarm.peerStats
 		let interestedAndChoked = swarm.leechers.intersection(swarm.interestedPeers).intersection(swarm.chokedPeers)
 
-		swarm.optimisticUnchokePeers.forEach( peer => peer.choke() )
+		swarm.optimisticUnchokePeers.forEach( peer => { peer.choke() ; peer.optUnchoked = false}  )
 	
 		let unchokeCandidates = Array.from(interestedAndChoked).sort( (p1, p2) => (peerMap.get(p2.peerID).firstConnect) - (peerMap.get(p1.peerID).firstConnect ) )
 		
@@ -915,6 +915,7 @@ Downloader.prototype.optUnchokeLoop = function() {
 			let randIdx = Math.floor(Math.random() ** 2 * unchokeCandidates.length)
 			let candidate = unchokeCandidates.splice(randIdx, 1)[0]
 			candidate.unchoke()
+			candidate.optUnchoke = true
 
 		}
 
@@ -926,10 +927,9 @@ Downloader.prototype.unchokeLoop = function() {
 
 	//choke any peer that chokes me and is not opt unchoke
 	let peers = swarm.leechers.difference(swarm.optimisticUnchokePeers)
-	let unchoked = peers.intersection(swarm.unchokedPeers)
+	peers.intersection(swarm.unchokedPeers).intersection(swarm.amChokedPeers).forEach( peer => peer.choke() )
 
 	let self = this
-	unchoked.intersection(swarm.amChokedPeers).forEach( peer => peer.choke() )
 	
 	//mutually interested peers -- initially near zero --- must add group (3) peers when sending requests
 	let mutuallyInterestedPeers = swarm.leechers.intersection(swarm.interestedPeers).intersection(swarm.amInterestedPeers).difference(swarm.optimisticUnchokePeers)
@@ -946,7 +946,7 @@ Downloader.prototype.unchokeLoop = function() {
 	})
 
 	let numUnchoked = 0 
-	while(numUnchoked < 8 && unchokeCandidates.length > 0) {
+	while(numUnchoked < 8 && unchokeCandidates.length > 0) { //MAX_NUM_MUTUAL_UNCHOKE
 
 		candidate = unchokeCandidates.shift()
 		if(candidate.choke)
@@ -958,7 +958,7 @@ Downloader.prototype.unchokeLoop = function() {
 	unchokeCandidates.filter(peer => !peer.choked).forEach( peer => peer.choke())
 
 	if(numUnchoked < 8) { // 
-		//maybe optimistically unchoke more candidates
+		//unchoke more candidates
 		//so 8 mutually unchoked and 2 opt unchoked
 		//if 8 - k mutually unchoked then 2 + k opt unchoked ??
 	}
@@ -1077,20 +1077,27 @@ Downloader.prototype.addPeers = function(peers) {
 
 Downloader.prototype.DHTAnnounce = async function() {
 
-	let dht 
 	if(!this.dht) {
+
 		this.dht = new DHT(this.dhtPort, "")
+
 		if(fs.existsSync("./savedDHT"))
-			this.dht.loadDHT()
-		else 
-			dht.bootstrap() //loadDHT
+			await this.dht.loadDHT()
+
+		else {
+
+			this.dht.bootstrap() //loadDHT
+			//saveDHT
+
+		}
+
 	}
 
-	dht = this.dht
+	let peerList = await this.dht.announce(this.fileMetaData.infoHash, this.myPort)
 
-	let peerList = await dht.announce(this.fileMetaData.infoHash, this.myPort)
 	if(LOG)
 		console.log(peerList)
+
 	this.addPeers(peerList)
 
 }
@@ -1113,15 +1120,11 @@ Downloader.prototype.announce = async function() {
 
 			if(!tracker) {
 
-				if(u.protocol == 'udp:') {
-					if(LOG) console.log('UDP ANNOUNCE')
+				if(u.protocol == 'udp:')
 					tracker = new UDPTracker(u, infoHash, Buffer.from(peerID,'hex'), this.download.stats)
-				}
 					
-				else if (u.protocol == 'http:') {
-					if(LOG) console.log("HTTP announce")
+				else if (u.protocol == 'http:') 
 					tracker = new HTTPTracker(this.fileMetaData, this.download, u)
-				}
 
 				this.trackers[u.href] = tracker
 
