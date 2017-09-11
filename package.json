@@ -1,0 +1,49 @@
+{
+  "name": "fztorrent",
+  "email": "fawaz4188@gmail.com",
+  "version": "1.0.0",
+  "description": "A BitTorrent Client",
+  "main": "./swarm/index.js",
+  "directories": {
+    "lib": "lib",
+    "uTP": "uTP",
+    "swarm": "swarm",
+    "tracker": "tracker",
+    "dht": "dht",
+    "gui": "gui",
+    "metadata_exchange": "metadata_exchange",
+    "peer_exchange": "peer_exchange"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "http://f4188@bitbucket.org/f4188/fztorrent.git/"
+  },
+  "keywords": [],
+  "author": "Fawaz Arain",
+  "license": "ISC",
+  "dependencies": {
+    "angular": "^1.6.6",
+    "async": "^2.5.0",
+    "bencode": "^1.0.0",
+    "bootstrap": "^3.3.7",
+    "buffer-xor": "^2.0.2",
+    "electron": "^1.7.6",
+    "get-port": "^3.1.0",
+    "getport": "^0.1.0",
+    "graceful-fs": "^4.1.11",
+    "minimist": "^1.2.0",
+    "random-access-file": "^1.8.1",
+    "request": "^2.81.0",
+    "speedometer": "^1.0.0"
+  },
+  "devDependencies": {
+    "chai": "^4.1.0",
+    "gulp": "^3.9.1",
+    "gulp-exec": "^2.1.3",
+    "gulp-shell": "^0.6.3",
+    "mocha": "^3.4.2"
+  }
+}
