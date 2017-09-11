@@ -4,10 +4,14 @@
     <title>ztorrent</title>
 
     <!-- Stylesheets -->
-    <link rel="stylesheet" href="node_modules/bootstrap/dist/css/bootstrap.min.css">
-    <link rel="stylesheet" href="../css/photon.min.css">
+    <link rel="stylesheet" href="../../node_modules/bootstrap/dist/css/bootstrap.min.css">
+    <!--link rel="stylesheet" href="../css/photon.min.css"-->
 
     <style media="screen" type="text/css"> 
+
+    body {
+      font-size: 12px;
+    }
 
     .initializing {
       -webkit-animation: pulse 2s infinite;
@@ -48,11 +52,11 @@
 
   <div ng-app="App" ng-controller="MainWindow">
 
-        <div class="padded" style="background: #fcfcfc">
+        <div class="" style="padding: 10px 10px; background: #fcfcfc;">
 
       <div>
         <div class="input-group" >
-            <span style="position: initial;" class="input-group-addon  glyphicon glyphicon-cog padded" ng-click=openSettings()></span> 
+            <span style="position: initial;" class="input-group-addon  glyphicon glyphicon-cog" ng-click=openSettings()></span> 
             <span style="position: initial;" class="input-group-addon glyphicon glyphicon-folder-open" ng-click=openFile()></span> 
             <span  style="position: initial;" class="input-group-addon glyphicon glyphicon-magnet" ng-click=openMagnetUri()></span> 
             <input class="form-control" ng-model="magnetURI" type="text" placeholder="file path or magnet link" >
@@ -79,14 +83,14 @@
             </div>
 
               <div>
-                <button class="btn btn-small" ng-hide="(torrent.state != 4)">
-                  <span class="glyphicon glyphicon-play" ng-click="start(torrent)"></span>
+                <button class="btn btn-sm" ng-hide="(torrent.state != 4)" ng-click="start(torrent)">
+                  <span class="glyphicon glyphicon-play" ></span>
                 </button>
-                <button class="btn btn-small"  ng-hide="(torrent.state != 1 || torrent.state == 0)" >
-                  <span class="glyphicon glyphicon-pause" ng-click="stop(torrent)"></span>
+                <button class="btn btn-sm"  ng-hide="(torrent.state != 1 || torrent.state == 0)" ng-click="stop(torrent)" >
+                  <span class="glyphicon glyphicon-pause" ></span>
                 </button>
-                <button class="btn btn-small">
-                <span class="glyphicon glyphicon-trash" ng-click="delete(torrent, $index)"></span>
+                <button class="btn btn-sm" ng-click="delete(torrent, $index)">
+                <span class="glyphicon glyphicon-trash" ></span>
                 </button>
               </div>
               

@@ -37,7 +37,7 @@ var getAddr = function getAddressFromURL(url) {
 }
 
 
-getUDPSocket = function(port) { //run tests
+getUDPSocket = function(port) {
 
 	let sock = dgram.createSocket('udp4').bind(port)
 
@@ -95,15 +95,16 @@ class HTTPTracker {
 		try {
 
 			resp = await this.request(params, info, peerID)
-			//decodedResp = benDecode(resp) 
-			console.log(resp)
-			let {interval, peers, complete, incomplete} = {}// decodedResp || {}
 			
+			decodedResp = benDecode(resp) 
+			let {interval, peers, complete, incomplete} = decodedResp || {}
+
+			/*
 			let pIdx = resp.indexOf('5:peers')
 			let peerBuf = resp.slice(pIdx + 7)
 			let idx = peerBuf.indexOf(':')
 			peers = peerBuf.slice(idx + 1).slice(0, -1)
-
+			*/
 			return {
 
 				'numLeechers' : incomplete || 0,
@@ -165,7 +166,6 @@ function UDPTracker(url, infoHash, peerID, stats) {
 	this.canConnect = true 
 	this.canConnectTimeout
 
-	//this.client = sock
 	this.address = net.isIP(url.hostname) ?  url.hostname : this.address = null
 
 	//tracker address
@@ -176,8 +176,8 @@ function UDPTracker(url, infoHash, peerID, stats) {
 	this.infoHash = infoHash
 	this.peerID = peerID
 
-	//this.stats = null
 	this.stats = stats
+
 	//filled by tracker on announce
 	this.numLeechers = null,
 	this.numSeeders = null,
@@ -188,7 +188,6 @@ function UDPTracker(url, infoHash, peerID, stats) {
 	this.connectID = null;
 	this.connectIDEx = null;
 	this.default_timeout = 3000
-
 
 }
 

@@ -28,9 +28,9 @@ var PeerEx = require('../peer_exchange/index.js').PeerEx
 
 const Peer = PeerEx(UTMetaDataEx(_Peer))
 
-const MAX_NUM_PEERSTATS = 2000
+const MAX_NUM_PEERSTATS = 2000 //
 const SOFT_MIN_CONNECTIONS = 50
-const SOFT_MIN_INTERESTED = 35
+const SOFT_MIN_INTERESTED = 25
 const SOFT_MIN_UNCHOKED = 15
 const HARD_MAX_CONNECTIONS = 100
 const SOFT_MAX_CONNECTIONS = 50
@@ -38,10 +38,10 @@ const KEEP_ALIVE_INTERVAL = 30 * 1e3
 const PEER_CONNECT_TIMEOUT = 3 * 1e3
 const CONNECT_LOOP_INTERVAL = 60 * 1e3
 const PRUNE_IGNORE_TIME = 60 * 1e3 
-const MIN_UP_RATE = 1 * 1e3
+const MIN_UP_RATE = 1 * 1e3 
 
 const NUM_REQUESTS_PER_PEER = 1 // 2
-const NUM_REQUESTS_TOTAL = 200
+const NUM_REQUESTS_TOTAL = 200 //
 const NUM_ACTIVE_PIECES = 50
 const MAX_NUM_OPT_UNCHOKE = 4
 const MAX_NUM_MUTUAL_UNCHOKE = 12
@@ -116,7 +116,10 @@ class Swarm extends EventEmitter {
 			//, { added : added, added6 : added6, dropped : dropped, dropped6 : dropped6 })
 			'peer_exchange' : [ (added, added6, dropped, dropped6 ) => {
 
-
+				//ignore added6
+				if(LOG)
+					console.log("adding:", added)
+				self.addPeers(added)
 
 			}],
 
@@ -297,7 +300,7 @@ class Swarm extends EventEmitter {
 
 	connectMorePeersCond () {
 
-		return Math.max(SOFT_MIN_CONNECTIONS - this.peers.size, 15 - this.amUnchokedPeers.size, 25 - this.aInterestedPeers.size, 0)
+		return Math.max(SOFT_MIN_CONNECTIONS - this.peers.size, SOFT_MIN_UNCHOKED - this.amUnchokedPeers.size, SOFT_MIN_INTERESTED - this.aInterestedPeers.size, 0)
 	
 	}
 

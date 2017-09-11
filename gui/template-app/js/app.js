@@ -1,5 +1,5 @@
 
-angular = require('./node_modules/angular/index.js')
+angular = require('angular')
 Downloader = require('../../swarm/index.js').Downloader
 randomBytes = require('crypto').randomBytes
 
