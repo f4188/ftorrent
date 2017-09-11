@@ -74,10 +74,10 @@
                 <strong>{{torrent.fileMetaData.name}}</strong> &nbsp; {{torrent.progress}}
               </p>
 
-              <div class="progress list-elems"  ng-hide="isHidden(torrent)">
-                <div class="progress-bar" role="progressbar" ng-class="{started:(torrent.state == 1), stopped:(torrent.state == 4)}" aria-valuenow="{{calcProgress(torrent)}}" style="width: {{calcProgress(torrent)}}%" aria-valuemin="0" aria-valuemax="100"></div>
+              <div class="progress list-elems" style="margin-bottom: 10px;" ng-hide="isHidden(torrent)">
+                <div class="progress-bar"  role="progressbar" ng-class="{started:(torrent.state == 1), stopped:(torrent.state == 4)}" aria-valuenow="{{calcProgress(torrent)}}" style="width: {{calcProgress(torrent)}}%" aria-valuemin="0" aria-valuemax="100"></div>
               </div>
-              <p class="list-elems">
+              <p class="list-elems" style="margin-bottom: 0px">
                 {{torrent.getStatus}}
               </p>
             </div>

@@ -56,7 +56,7 @@ const INITIALIZE_DHT = false
 
 const DOWNLOAD_DIRECTORY = "./"
 
-LOG = true
+LOG = false
 
 var createDirectory = (dirName) => {
 
@@ -533,8 +533,9 @@ class Swarm extends EventEmitter {
 #   13 stop
 */
 
-function Downloader(myPort, peerID, dht) { //extends eventEmitter
+function Downloader(myPort, peerID, dht, log) { //extends eventEmitter
 
+	LOG = log 
 	EventEmitter.call(this)
 
 	this.myIP = ""
@@ -947,7 +948,6 @@ Downloader.prototype.seed = function () {
 
 Downloader.prototype.announceLoop = function() {
 	
-	console.log('trackerless', this.trackerless)
 	if(this.enableDHT || this.trackerless)
 		this.DHTAnnounce()	
 	
@@ -1163,7 +1163,6 @@ Downloader.prototype.addPeers = function(peers) {
 
 Downloader.prototype.DHTAnnounce = async function() {
 
-	console.log("is dht", this.dht)
 	if(!this.dht && !INITIALIZE_DHT)
 		return
 
@@ -1187,7 +1186,6 @@ Downloader.prototype.DHTAnnounce = async function() {
 	if(!this.setDHTListener) 
 		this.dht.on('got_peers', ( peers ) => { self.addPeers(peers) } )
 
-	console.log("DHTAnnounce")
 	let peerList = await this.dht.announce(this.fileMetaData.infoHash, this.myPort)
 
 	if(LOG)

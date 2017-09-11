@@ -11,20 +11,6 @@ const {BrowserWindow} = require('electron').remote
 const {clipboard} = require('electron').remote
 const ipcRenderer = require('electron').ipcRenderer
 
-/*
-      DHT = require('../dht/index.js').DHT
-      dht = new DHT(10000, "")
-
-      dht.bootstrap().then( () => {
-        client = new Client(dht)
-        client.app().catch(x => console.log(x))
-
-      }).catch(x => console.log(x))
-
-    */
-
-
-
 var app = angular.module('App', [])
 
 app.controller('MainWindow', function($scope, $interval) {
@@ -33,14 +19,32 @@ app.controller('MainWindow', function($scope, $interval) {
 
   let setupDHT = async () => {
 
-    let port = await getPort()
-    let dht = new DHT(port, "")
-    $scope.dht = dht
+    console.log('setupDHT')
+    let dht = $scope.dht
+    if(!$scope.dht) {
+
+      let port = await getPort()
+      dht = new DHT(port, "")
+      $scope.dht = dht
+
+    }
 
     if(fs.existsSync("./savedDHT"))
       await dht.loadDHT()
-    else 
-      await dht.bootstrap(true) 
+
+    else {
+
+      try {
+        
+        await dht.bootstrap(true) 
+
+      } catch( error ) {
+
+        console.log(error)
+        setTimeout( setupDHT , 10 * 1e3)
+
+      }
+    }
 
   }
 
@@ -142,7 +146,7 @@ app.controller('MainWindow', function($scope, $interval) {
       return
 
     let port = await getPort()
-    let downloader = new Downloader(port, null, $scope.dht)
+    let downloader = new Downloader(port, null, $scope.dht, true)
     downloader.enableDHT = true
 
     downloader.progress = progress(downloader)
@@ -172,7 +176,7 @@ app.controller('MainWindow', function($scope, $interval) {
   $scope.openMagnetUri = async () => {
 
     let port = await getPort()
-    let downloader = new Downloader(port, null, $scope.dht)
+    let downloader = new Downloader(port, null, $scope.dht, true)
     downloader.enableDHT = true
 
     try {
