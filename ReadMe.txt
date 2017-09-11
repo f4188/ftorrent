@@ -1,4 +1,11 @@
 
+To setup:
+(1) clone repo
+(2) cmd: npm install
+(3) cmd: electron ./main.js 
+
+or start up term ui by cmd: ./swarm/client.js -u
+
 fztorrent
 
 udp tracker  *****
@@ -11,7 +18,7 @@ base client ****
 extended message protocol ****
 - metadata exchange ****/*
 - peer exchange ***
-DHT **** - need to test announce
+DHT ****
 
 terminal ui *** 
 gui ****
