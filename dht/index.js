@@ -1,8 +1,10 @@
 
-dgram = require('dgram')
-crypto = require('crypto')
-async = require('async')
-xor = require('buffer-xor')
+const dgram = require('dgram')
+const crypto = require('crypto')
+const async = require('async')
+const xor = require('buffer-xor')
+const dns = require('dns')
+EventEmitter = require('events').EventEmitter
 
 benDecode = require('bencode').decode
 benEncode = require('bencode').encode
@@ -49,10 +51,11 @@ var readStreamFunc = async (path) => {
 class TimeoutError extends Error {}
 class KRPCError extends Error {}
 
-class DHT {
+class DHT extends EventEmitter {
 
 	constructor(port, host, sock) {
 
+		super()
 		//buckets = [ [first level], [second level], ... ]
 		// {  1st lvl  (s) , _________________________________}  0 to 2^160
 		//                  {   2nd lvl  (s), ________________}  0 to 2^159, 2^159 to 2^160
@@ -122,7 +125,7 @@ class DHT {
 
 				if(!node) {
 
-					node = new Node(nodeID, port, host, this.myNodeID, this.sock, this.parseNodeContactInfos)
+					node = new Node(nodeID, port, host, this.myNodeID, this.sock, (this.parseNodeContactInfos).bind(this))
 					this.nodes.set(nodeID, node)
 
 				} else {
@@ -139,7 +142,7 @@ class DHT {
 			}
 		}
 
-		this.makeNode = this._makeNode()
+		this.makeNode = (this._makeNode()).bind(this)
 
 	}
 
@@ -236,13 +239,13 @@ class DHT {
 
 	async bootstrap(log) {
 
-		LOG = log ? log : false
+		LOG = log// log ? log : false
 		this.myNodeID = crypto.randomBytes(20).toString('hex')
 		this.makeNode(this.myNodeID ,this.port, this.host)
 
 		let bootstrapNodeAddrs = [[6881, 'router.bittorrent.com'], [6881, 'dht.transmissionbt.com'], [6881, 'router.utorrent.com']]		
 		let ips = await Promise.race(bootstrapNodeAddrs.map( node =>  this.lookup(node[1])))
-		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock, this.parseNodeContactInfos) //do not insert in routing table
+		let bootStrapNode = new Node("", 6881, ips, this.myNodeID, this.sock, (this.parseNodeContactInfos).bind(this)) //do not insert in routing table
 
 		let nodes, node
 		let tries = 0
@@ -254,6 +257,9 @@ class DHT {
 				[[node], nodes] = await bootStrapNode.findNode(this.myNodeID) // inserts nodes in dht 
 			
 			} catch (error) {
+
+				if(LOG)
+					console.log(error)
 
 				if(error instanceof TimeoutError && tries >= 5)
 					throw new TimeoutError('bootstrap node timeout')
@@ -279,7 +285,12 @@ class DHT {
 		let [peers, nodes] = await this.getPeersIter(infoHash)
 
 		let self = this
-		nodes.forEach(node => self.getNode(node).announcePeer(infoHash, port))
+
+		async.each( nodes, (node, callback) => { self._getNode(node).getPeers(infoHash).then( x => { self.emit("got_peers", x[0].map( peer => { return { ip : peer.host, port : peer.port }})); callback() } ) }, (err) => {
+
+			nodes.forEach(node => { self._getNode(node).announcePeer(infoHash, port) } )
+
+		} )
 		
 		return peers.map( peer => { return {ip : peer.host, port : peer.port} } )
 
@@ -721,22 +732,28 @@ class DHT {
 		var slicer = (buf) => {
 
 			let slices = []
+
 			while(buf.length > 0) {
+
 				slices.push(buf.slice(0,26))
 				buf = buf.slice(26)
+
 			}
+
 			return slices
 
 		}
 
-		return slicer(compactInfos).map(info => {
+		var _makeNode = (info => {
 
 			let parsedHost = info.slice(20,24).toString('hex').match(/.{2}/g).map( num => Number('0x'+num)).join('.') //: host.toString().match(/.{2}/g).map( num => Number(num)).join('.')
 			let parsedPort = info.slice(24,26).readUInt16BE()
 
 			return this.makeNode(info.slice(0,20).toString('hex'), parsedPort, parsedHost)
 		
-		})
+		}).bind(this)
+
+		return slicer(compactInfos).map(_makeNode)
 
 	}
 
@@ -1031,11 +1048,12 @@ class Node {
 
 		let transactID = crypto.randomBytes(2)
 		let request = {'t': transactID, 'y':'q', 'q': 'announce_peer', 'a' : {'id': Buffer.from(this.myNodeID,'hex'), 'implied_port': 1,
-		'infoHash': infoHash, 'port': port, 'token': this.token}}
+		'info_hash': infoHash, 'port': port, 'token': this.token}}
 
 		try {
 			
 			response = await this._sendRequest(request)
+			return response.r.id
 
 		} catch ( error ) {
 
@@ -1046,7 +1064,7 @@ class Node {
 
 		}
 
-		return response.r.id
+		return false		
 
 	}
 

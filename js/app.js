@@ -1,8 +1,10 @@
 
 angular = require('angular')
 Downloader = require('./swarm/index.js').Downloader
+DHT = require('./dht/index.js').DHT
 randomBytes = require('crypto').randomBytes
-
+const getPort = require('get-port')
+const fs = require('fs')
 
 const {dialog} = require('electron').remote
 const {BrowserWindow} = require('electron').remote
@@ -27,13 +29,29 @@ var app = angular.module('App', [])
 
 app.controller('MainWindow', function($scope, $interval) {
 
+  $scope.dht = null 
+
+  let setupDHT = async () => {
+
+    let port = await getPort()
+    let dht = new DHT(port, "")
+    $scope.dht = dht
+
+    if(fs.existsSync("./savedDHT"))
+      await dht.loadDHT()
+    else 
+      await dht.bootstrap(true) 
+
+  }
+
+  setupDHT()
+
   $scope.magnetURI = null 
 
   $scope.torrents = []
   $scope.torrentIdx = null
   var statusMessages = ["initializing", "reading torrent file", "announcing", "connecting peers", "fetching metadata", "reading metadata","downloading", "seeding" ]
 
-  var port = 7000
   var timeLeft = (tor) => tor.swarm.globalDownRate ? (tor.fileMetaData.numPieces - tor.download.pieces.size) * tor.fileMetaData.pieceLength / tor.swarm.globalDownRate : "~" 
   var eta = (tor) => Math.floor(timeLeft(tor) / 60 / 60) + "hrs " + Math.floor(timeLeft(tor) / 60) % 60 + "mins "
   var calcProgress = (tor) => Math.round(tor.download.pieces.size / tor.fileMetaData.numPieces * 1000)/10
@@ -54,7 +72,7 @@ app.controller('MainWindow', function($scope, $interval) {
       msg += calcProgress(torrent) + " %"
 
     if(torrent.state == 1 ) {
-      //if(!torrent.swarm.globalDownRate)
+
       msg += " | DL: " + Math.round(torrent.swarm.globalDownRate / 100) / 10 + " KB/s"
       msg += " | UL: " + Math.round(torrent.swarm.globalUpRate / 100) / 10 + " KB/s"
 
@@ -111,12 +129,9 @@ app.controller('MainWindow', function($scope, $interval) {
 
   $scope.progress = progress
   $scope.getStatus = getStatus
-
  
   $scope.start = (torrent) => { torrent.start() }
-
   $scope.stop = (torrent) => { torrent.stop() }
-
   $scope.delete = (torrent, index) => { torrent.stop(); $scope.torrents.splice(index, 1) }
 
   $scope.openFile = async () => {
@@ -126,8 +141,10 @@ app.controller('MainWindow', function($scope, $interval) {
     if(!fileName)
       return
 
-    let downloader = new Downloader(port++)
-    
+    let port = await getPort()
+    let downloader = new Downloader(port, null, $scope.dht)
+    downloader.enableDHT = true
+
     downloader.progress = progress(downloader)
     downloader.getStatus = getStatus(downloader)
 
@@ -152,9 +169,11 @@ app.controller('MainWindow', function($scope, $interval) {
         
   }
 
-  $scope.openMagnetUri = () => {
+  $scope.openMagnetUri = async () => {
 
-    let downloader = new Downloader(port++)
+    let port = await getPort()
+    let downloader = new Downloader(port, null, $scope.dht)
+    downloader.enableDHT = true
 
     try {
 

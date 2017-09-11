@@ -52,6 +52,8 @@ const ANNOUNCE_LOOP_INTERVAL = 10 * 60 * 1e3
 const ENABLE_DHT = false
 const DHT_PORT = 8000
 
+const INITIALIZE_DHT = false
+
 const DOWNLOAD_DIRECTORY = "./"
 
 LOG = true
@@ -114,11 +116,13 @@ class Swarm extends EventEmitter {
 		this.listeners = {
 
 			//, { added : added, added6 : added6, dropped : dropped, dropped6 : dropped6 })
-			'peer_exchange' : [ (added, added6, dropped, dropped6 ) => {
+			'peer_exchange' : [ (arg) => {
 
+				let { added, added6, dropped, dropped6 } = arg
 				//ignore added6
 				if(LOG)
 					console.log("adding:", added)
+
 				self.addPeers(added)
 
 			}],
@@ -549,6 +553,7 @@ function Downloader(myPort, peerID, dht) { //extends eventEmitter
 	this.dht = dht
 	this.dhtPort = DHT_PORT
 	this.enableDHT = ENABLE_DHT
+	this.setDHTListener = false
 
 	this.activePieces = new NMap()
 	this.pieces = new Map()
@@ -942,6 +947,7 @@ Downloader.prototype.seed = function () {
 
 Downloader.prototype.announceLoop = function() {
 	
+	console.log('trackerless', this.trackerless)
 	if(this.enableDHT || this.trackerless)
 		this.DHTAnnounce()	
 	
@@ -1157,22 +1163,31 @@ Downloader.prototype.addPeers = function(peers) {
 
 Downloader.prototype.DHTAnnounce = async function() {
 
+	console.log("is dht", this.dht)
+	if(!this.dht && !INITIALIZE_DHT)
+		return
+
 	if(!this.dht) {
 
 		this.dht = new DHT(this.dhtPort, "")
 
 		if(fs.existsSync("./savedDHT"))
 			await this.dht.loadDHT()
+		else
+			this.dht.bootstrap() 
 
-		else {
+	} else if(this.dht.buckets.length <= 1) {
 
-			this.dht.bootstrap() //loadDHT
-			//saveDHT
-
-		}
+		await this.dht.bootstrap()
 
 	}
 
+	let self = this
+
+	if(!this.setDHTListener) 
+		this.dht.on('got_peers', ( peers ) => { self.addPeers(peers) } )
+
+	console.log("DHTAnnounce")
 	let peerList = await this.dht.announce(this.fileMetaData.infoHash, this.myPort)
 
 	if(LOG)
@@ -1217,6 +1232,7 @@ Downloader.prototype.announce = async function() {
 
 			peerList = peerList || []
 			this.addPeers(peerList)
+			callback()
 
 			if(LOG) {
 				console.log("Tracker:", announceUrl)
@@ -1227,7 +1243,9 @@ Downloader.prototype.announce = async function() {
 
 		} catch(error) {
 
-			console.log(error)
+			if(LOG)
+				console.log(error)
+			callbback()
 
 		} 
 
