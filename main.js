@@ -3,8 +3,7 @@ const {app, BrowserWindow, Menu, dialog} = require('electron')
 ipcMain = require('electron')
 clipboardy = require('clipboardy')
 
-
- //require('electron-titlebar') 
+//require('electron-titlebar') 
 //const ElectronTitlebarWindows = require('electron-titlebar-windows')
 
 var mainWindow = null;
