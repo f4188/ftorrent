@@ -4,6 +4,8 @@ Transform = require('stream').Transform
 benDecode = require('bencode').decode 
 benEncode = require('bencode').encode
 PassThrough = require('stream').PassThrough
+util = require('util')
+crypto = require('crypto')
 
 const HANDSHAKE_LENGTH = 1 + 19 + 8 + 20 + 20 
 

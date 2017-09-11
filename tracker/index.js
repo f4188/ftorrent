@@ -11,7 +11,10 @@ const randomBytes = require('crypto').randomBytes
 const dns = require('dns')
 const request = require('request')
 const benDecode = require('bencode').decode
-http = require('http')
+const http = require('http')
+const net = require('net')
+const querystring = require('querystring')
+const url = require('url')
 
 const UDPRes = require('./UDPResponse.js')
 const AnnounceResp = UDPRes.AnnounceResp
@@ -63,15 +66,27 @@ class HTTPTracker {
 
 	async doAnnounce(port) {
 
-		var params = { 
+		let percentEscape = (buf) => buf.toString('hex').match(/.{2}/g).map( x => {
+			if(parseInt("0x" + x) >= 0x80) {
+				return "%" + x
+			} else {
+				return querystring.escape(Buffer.from( [parseInt("0x" + x)] ).toString('ascii') )
+			}
+		}).join("") 
 
-			info_hash: Buffer.from(this.file.infoHash,'hex').toString('ascii'), 
-			peer_id: Buffer.from(this.download.peerID, 'hex').toString('ascii'),
+
+		let info = percentEscape(this.file.infoHash)
+		let peerID = percentEscape(this.download.peerID)
+
+
+		var params = { 
+			
 			port : port,
 			uploaded : this.download.stats.uploaded,
 			downloaded : this.download.stats.downloaded,
 			left : this.download.stats.left,
-			event : this.download.stats.ev
+			compact : 1,
+			event : 'started'//this.download.stats.ev
 
 		}
 
@@ -79,37 +94,58 @@ class HTTPTracker {
 
 		try {
 
-			resp = await this.request(params)
-			decodedResp = benDecode(resp) 
-
-			let {interval, peers, complete, incomplete} = decodedResp || {}
-			this.interval = interval
+			resp = await this.request(params, info, peerID)
+			//decodedResp = benDecode(resp) 
+			console.log(resp)
+			let {interval, peers, complete, incomplete} = {}// decodedResp || {}
+			
+			let pIdx = resp.indexOf('5:peers')
+			let peerBuf = resp.slice(pIdx + 7)
+			let idx = peerBuf.indexOf(':')
+			peers = peerBuf.slice(idx + 1).slice(0, -1)
 
 			return {
 
 				'numLeechers' : incomplete || 0,
 				'numSeeders' : complete || 0,
 				'interval' : this.interval || 600 * 1e3,
-				'peerList' : this.peers || []
+				'peerList' : this.getPeerList(peers) || []
 
 			}
 
 		} catch (error) {
-			
+
+			console.log(error)
 			return {}
 
 		}
 
 	}
 
-	request (params) {
+	getPeerList(buf) {
+
+		let numAddrs = Math.floor(buf.length/6);
+		let addrs = []
+		let addr, host, port
+
+		for(var i = 0; i < numAddrs; ++i ) {
+			addr = buf.slice(i * 6, i * 6 + 6)
+			host = addr.slice(0,4).map(byte => byte).join('.')
+			port = addr.slice(4,6).readUInt16BE()
+			addrs.push({ip : host , 'port' : port})
+		}
+
+		return addrs;
+	}
+
+	request (params, info, peerID) {
 
 		let self = this
-		new Promise( (resolve, reject) => {
+		return new Promise( (resolve, reject) => {
 
-			url = self.url + "?" + querystring.stringify(params)
+			let reqUrl = self.url + "?" + 'info_hash=' + info + "&peer_id=" + peerID + "&" + querystring.stringify(params)
 
-			request({url : url}, (err, response, body) => {
+			request({url : reqUrl, encoding : null}, (err, response, body) => {
 
 				if(err)
 					reject(err)

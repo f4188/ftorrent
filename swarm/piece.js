@@ -4,8 +4,8 @@
  * A piece object with read and verify methods
  * An active piece object with isComplete, assemble, write methods
 */
-
-var fs = require('graceful-fs')
+const crypto = require('crypto')
+const fs = require('graceful-fs')
 
 var readStreamFunc = (start, len, file) => {
 

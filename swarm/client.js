@@ -523,13 +523,13 @@ class Client {
 
 			term.blue(repeat("=", term.width)).nextLine(1)
 
-			term.right(1).cyan(title + " " + this.torrents[idx].fileMetaData.name).move(term.width - title.length - escMsg.length - this.torrents[idx].fileMetaData.name.length- 3).bold(escMsg)
+			term.right(1).cyan(title + " " + this.torrents[idx].fileMetaData.name).move(term.width - title.length - escMsg.length - this.torrents[idx].fileMetaData.name.length- 3).bold(escMsg).nextLine()
 
 			term.blue(repeat("=", term.width)).nextLine(1)
 
 			let tor = this.torrents[idx]
 			//term.green(this.torrents[idx].fileMetaData.name)
-			term.nextLine(1)
+			//term.nextLine(1)
 			term.right(1).bold("Info hash: " + this.torrents[idx].fileMetaData.infoHash.toString('hex'))
 			term.nextLine(1)
 			term.right(1).bold("Have metadata: " + this.torrents[idx].fileMetaData.ready + "   ")
@@ -553,13 +553,15 @@ class Client {
 			term.nextLine(1)
 			term.right(1).bold("Interested: " + tor.swarm.interestedPeers.size + "  ")
 			term.nextLine(1)
-			term.right(1).bold("Unchoking: " + tor.swarm.unchokedPeers.size + "  ")
+			term.right(1).bold("Peers unchoking: " + tor.swarm.amUnchokedPeers.size + "  ")
 			term.nextLine(1)
 			term.right(1).bold("Peers interested: " + tor.swarm.amInterestedPeers.size + "  ")
 			term.nextLine(1)
-			term.right(1).bold("Peers unchoking: " + tor.swarm.amUnchokedPeers.size + "  ")
+			term.right(1).bold("Unchoking: " + tor.swarm.unchokedPeers.size + "  ")
+			term.nextLine(1)
+			
+			term.nextLine(1)
 
-			term.nextLine(2)
 			var progress = Math.round(tor.pieces.size / tor.fileMetaData.numPieces * 1000) /10
 			term.right(1).bold("Completed: " + progress + " %  ")
 			term.nextLine(1)

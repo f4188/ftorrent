@@ -6,6 +6,12 @@ const speedometer = require('speedometer')
 EventEmitter = require('events').EventEmitter
 const randomAccessFile = require('random-access-file')
 const path = require("path")
+const util = require('util')
+const crypto = require('crypto')
+const net = require('net')
+const fs = require('graceful-fs')
+const querystring = require('querystring')
+const url = require('url')
 
 const NSet = require('../lib/NSet.js').NSet
 const NMap = require('../lib/NSet.js').NMap
@@ -48,7 +54,7 @@ const DHT_PORT = 8000
 
 const DOWNLOAD_DIRECTORY = "./"
 
-LOG = false
+LOG = true
 
 var createDirectory = (dirName) => {
 
@@ -253,8 +259,8 @@ class Swarm extends EventEmitter {
 
 			} catch (error) {
 
-				if(LOG)
-					console.log(error)
+				//if(LOG)
+				//	console.log(error)
 
 			}
 
@@ -280,6 +286,7 @@ class Swarm extends EventEmitter {
 
 			addrs = Array.from(new NSet(addrs))
 			addrs = addrs.slice(0, numAddrs)
+			self.emit('connecting_peers')
 			async.each(addrs, _addPeer, (err) => { self.emit('new_peers') })
 
 		}
@@ -425,13 +432,13 @@ class Swarm extends EventEmitter {
 
 	get leechers() {
 
-		return this.peers.filter(peer => !peer.isSeeder())
+		return this.peers.filter( peer => !peer.isSeeder() )
 
 	}
 
 	get seeders() {
 
-		return this.peers.filter( peer => peer.isSeeder())
+		return this.peers.filter( peer => peer.isSeeder() )
 
 	}
 
@@ -503,6 +510,22 @@ class Swarm extends EventEmitter {
 
 }
 
+/*
+  1 (error)
+#    2 (checked)
+#    3 (paused)
+#    4 (super seeding)
+#    5 (seeding)
+#    6 (downloading)
+#    7 (super seeding (forced))
+#    8 (seeding (forced))
+#    9 (downloading (forced))
+#    10 (queued seed)
+#    11 (finished)
+#    12 (queued)
+#   13 stop
+*/
+
 function Downloader(myPort, peerID, dht) { //extends eventEmitter
 
 	EventEmitter.call(this)
@@ -523,16 +546,20 @@ function Downloader(myPort, peerID, dht) { //extends eventEmitter
 	this.dht = dht
 	this.dhtPort = DHT_PORT
 	this.enableDHT = ENABLE_DHT
-	//this.dht = null
-	
-	this.requests = []
 
 	this.activePieces = new NMap()
 	this.pieces = new Map()
-	this.seeding = false
+	this.seeding = null
+
+	this.announcing = null
+
+	this.STATES = { 'seeding' : 0, 'leeching' : 1, 'uninitialized' : 2, 'initialized' : 3, 'stopped' : 4 }
+	this.state = this.STATES['uninitialized']
+	this.actions = {'checking_disk': false, 'reading_file' : false ,'announcing' : false, 'dht_announcing': false , 'connecting' : false, 'fetching_metadata' : false }
 
 	this.fileMetaData = {
 
+		'magnetURIString' : null,
 		'peerID' : this.peerID, //kill
 		'activePieces' : this.activePieces, //kill
 		'pieces' : this.pieces, //pieces this peer has //kill
@@ -576,6 +603,16 @@ function Downloader(myPort, peerID, dht) { //extends eventEmitter
 
 	this.swarm = new Swarm(this.fileMetaData, this.download, this.myIP, this.myPort)
 
+	this.swarm.on('connecting_peers', () => { 
+
+		if(!self.fileMetaData.metaInfoRaw)
+			self.actions['fetching_metadata'] = true
+		self.actions['connecting'] = true
+
+	})
+
+	this.swarm.on('new_peers', () => { self.actions['connecting'] = false })
+
 	//connected/disconnected/peer_interested/peer_unchoked/peer_choked/new_pieces
 	this.swarm.listeners['got_meta_data'] = [ ( async (buf) => { 
 
@@ -586,6 +623,8 @@ function Downloader(myPort, peerID, dht) { //extends eventEmitter
 			console.log('got metadata')
 
 		this.fileMetaData.metaInfoRaw = buf
+		this.actions['fetching_metadata'] = false
+
 		let seeding = await this.setMetaInfo(buf)
 		this.fileMetaData.ready = true
 		if(!seeding)
@@ -644,7 +683,9 @@ function Downloader(myPort, peerID, dht) { //extends eventEmitter
 							
 			if(self.pieces.size == self.fileMetaData.numPieces) {
 				self.seeding = true
-				//self.fileMetaData.files.forEach( (file) => file.end() )
+				// should close write file descriptor
+				///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+				self.fileMetaData.files.forEach( (file) => file.end() )
 				self.seed()	
 				return	
 			} 
@@ -662,30 +703,45 @@ function Downloader(myPort, peerID, dht) { //extends eventEmitter
 util.inherits(Downloader, EventEmitter)
 
 Downloader.prototype.setMetaInfoFile = async function (metaInfoFilePath) {
-	
-	if(!fs.existsSync(metaInfoFilePath))
-		throw new Error("File not found")
 
-	let fileMetaData = this.fileMetaData
-	let metaData = fs.readFileSync(metaInfoFilePath)
-	let deMetaData = benDecode(metaData)
-	let {announce, info} = deMetaData
+	this.actions['reading_file'] = true
 
-	let announceList = deMetaData['announce-list']
-	this.trackerless = ! (announceList || announce)
-	
-	if(!this.trackerless) {
+	try {
 
-		this.fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
-		if(announceList)
-			this.fileMetaData.announceUrlList = this.fileMetaData.announceUrlList.concat( announceList.map( url => url[0].toString()) )
+		if(!fs.existsSync(metaInfoFilePath))
+			throw new Error("File not found")
+
+		let fileMetaData = this.fileMetaData
+		let metaData = fs.readFileSync(metaInfoFilePath)
+		let deMetaData = benDecode(metaData)
+		let {announce, info} = deMetaData
+
+		let announceList = deMetaData['announce-list']
+		this.trackerless = ! (announceList || announce)
+		
+		if(!this.trackerless) {
+
+			this.fileMetaData.announceUrlList = Array.isArray(announce) ? announce.map( url => url.toString()) : [announce.toString()]
+			if(announceList)
+				this.fileMetaData.announceUrlList = this.fileMetaData.announceUrlList.concat( announceList.map( url => url[0].toString()) )
+
+		}
+		
+		fileMetaData.metaInfoRaw = info
+		let seeding = await this.setMetaInfo(benEncode(info))
+		fileMetaData.ready = true
+		this.state = this.STATES['initialized']
+		return seeding
+
+	} catch( error ) {
+
+		throw error
+
+	} finally {
+
+		this.actions['reading_file'] = false
 
 	}
-	
-	fileMetaData.metaInfoRaw = info
-	let seeding = await this.setMetaInfo(benEncode(info))
-	fileMetaData.ready = true
-	return seeding
 	
 }
 
@@ -695,17 +751,23 @@ Downloader.prototype.setMagnetUri = function(magnetUri) {
 		throw new Error("Invalid magnetURI")
 
 	let {xt, dn, tr} = querystring.parse(magnetUri.slice(8))
+
+	if(!xt)
+		throw new Error("Invalid magnetUri")
 	
 	let file = this.fileMetaData
+	file.magnetURIString = magnetUri
 	file.infoHash = Buffer.from(xt.slice(9), 'hex')
 	file.name = dn
 	file.announceUrlList = Array.isArray(tr) ? tr : [tr]
 	this.trackerless = !tr //need to get metaData
+	this.state = this.STATES['initialized']
 
 }
 
 Downloader.prototype.setMetaInfo = async function (info) {
 
+	this.actions['checking_disk'] = true
 	let fileMetaData = this.fileMetaData
 
 	fileMetaData.metaInfoSize = info.length
@@ -764,6 +826,7 @@ Downloader.prototype.setMetaInfo = async function (info) {
 		console.log('Have', Math.floor(this.pieces.size / this.fileMetaData.numPieces * 100), "% of pieces.")
 
 	this.seeding = this.pieces.size == fileMetaData.numPieces
+	this.actions['checking_disk'] = false
 	return this.seeding
 
 }
@@ -772,7 +835,13 @@ Downloader.prototype.getMetaData = function() {
 
 }
 
-Downloader.prototype.start = async function() {
+Downloader.prototype.start = async function(override) {
+
+	//already started or not setup with magnet link or torrent file - should probably throw exception
+	if( this.state != this.STATES['initialized'] && !override )
+		return
+	//if( (this.optLoop || this.state == this.STATES['uninitialized']) && !override )
+	//	return 
 
 	this.swarm.startTime = Date.now()
 
@@ -783,25 +852,32 @@ Downloader.prototype.start = async function() {
 	else
 		this.leech()
 
+	this.state = this.seeding ? this.STATES['seeding'] : this.STATES['leeching']
+
 }
 
 Downloader.prototype.stop = function() {
 
-		clearInterval(this.announceLoop)
-		clearInterval(this.sLoop)
-		clearInterval(this.optLoop)
-		clearInterval(this.unchokeLoop)
-		this.optLoop = null
+	//seeding or downloading
+	if(this.state == this.STATES['uninitialized'] || this.state == this.STATES['initialized']) return
 
-		clearInterval(this.swarm.connLoop)
-		this.swarm.acceptServerConn = false
-		let peers = this.swarm.peers
-		this.swarm.peers.forEach( peer => peer.sock.end())
+	clearInterval(this.announceLoop)
+	clearInterval(this.sLoop)
+	clearInterval(this.optLoop)
+	clearInterval(this.unchokeLoop)
+	this.optLoop = null
 
-		this.swarm.peers.clear()
-		this.activePieces.clear()
+	clearInterval(this.swarm.connLoop)
+	this.swarm.acceptServerConn = false
+	let peers = this.swarm.peers
+	this.swarm.peers.forEach( peer => peer.sock.end())
 
-		this.trackers = {}
+	this.swarm.peers.clear()
+	this.activePieces.clear()
+
+	this.trackers = {}
+
+	this.state = this.STATES['stopped']
 
 }
 
@@ -1009,7 +1085,7 @@ Downloader.prototype.downloadPieces = function() {
 
 Downloader.prototype.downloadPiecelets = function() { 
 
-	let swarm = this.swarm, requests = this.requests, peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
+	let swarm = this.swarm, /*requests = this.requests, */peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
 
 	if(peers.size == 0) 
 		return
@@ -1049,9 +1125,10 @@ Downloader.prototype.downloadPiecelets = function() {
 
 	}).bind(this)
 	
-	let peersWithOutstandingReq = new NSet(this.requests.map( req => req.peer ) )
-	let peersWithFourOutstandingReq = peersWithOutstandingReq.filter( peer => this.requests.reduce( (count, req) => req.peer == peer ? (count + 1): count, 0) > 1 )
-	peers = peers.difference(peersWithFourOutstandingReq)
+	//let peersWithOutstandingReq = new NSet(this.requests.map( req => req.peer ) )
+	//let peersWithFourOutstandingReq = peersWithOutstandingReq.filter( peer => this.requests.reduce( (count, req) => req.peer == peer ? (count + 1): count, 0) > 1 )
+	
+//	peers = peers.difference(peersWithFourOutstandingReq)
 
 	while(this.activePieces.getArray().map(piece => piece.requestsLeft()).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
 
@@ -1104,6 +1181,8 @@ Downloader.prototype.DHTAnnounce = async function() {
 
 Downloader.prototype.announce = async function() {
 	
+	this.announcing = true
+	this.actions['announcing'] = true
 	let infoHash = this.fileMetaData.infoHash
 	let peerID = this.peerID
 	
@@ -1151,10 +1230,14 @@ Downloader.prototype.announce = async function() {
 
 	}).bind(this)
 
+	let self = this
 	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err, callback) {
 
 		if(LOG && err)
 			console.log(err)
+		self.announcing = false
+		self.actions['announcing'] = false
+
 
 	})
 
