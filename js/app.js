@@ -36,7 +36,7 @@ app.controller('MainWindow', function($scope, $interval) {
 
       try {
         
-        await dht.bootstrap(true) 
+        await dht.bootstrap(false) 
 
       } catch( error ) {
 
@@ -83,7 +83,7 @@ app.controller('MainWindow', function($scope, $interval) {
       if(torrent.fileMetaData.ready)
         msg += " | " + ((fileLeft(torrent) >= (2 ** 20)) ? (Math.round( (fileLeft(torrent) / (2**20)) * 10) / 10 + " MiB") : Math.round( (fileLeft(torrent) / (2**10)) * 10) / 10 + " KiB")
       
-      if(torrent.fileMetaData.ready && torrent.fileMetaData.globalDownRate > 0 )
+      if(torrent.fileMetaData.ready && torrent.swarm.globalDownRate > 0 )
         msg += " | " + eta(torrent)
     }
 
@@ -115,15 +115,15 @@ app.controller('MainWindow', function($scope, $interval) {
       if(torrent.actions['checking_disk'])
         msg += ' | checking disk'
       
-      if(torrent.swarm.peers.size > 0) {
-        msg += " | " + torrent.swarm.peers.size + " peers | " + torrent.swarm.amUnchokedPeers.size + " uploading | " + torrent.swarm.unchokedPeers.size + " downloading"
+      if(torrent.swarm.peers.size > 0) { //&#8593; &#8595
+        msg += " | " + torrent.swarm.peers.size + " peer(s) | " + torrent.swarm.amUnchokedPeers.size + " uploading | " + torrent.swarm.unchokedPeers.size + " downloading"
       }
 
       if( (torrent.state == 0 || torrent.state == 1) && torrent.actions['announcing'])
         msg += " | announcing"
 
       if (torrent.actions['fetching_metadata'])
-        msg += " | fetching metadata..." 
+        msg += " | fetching metadata" 
       if(torrent.actions['connecting'])
         msg += " | connecting peers"
 
@@ -146,6 +146,7 @@ app.controller('MainWindow', function($scope, $interval) {
       return
 
     let port = await getPort()
+    console.log(port)
     let downloader = new Downloader(port, null, $scope.dht, true)
     downloader.enableDHT = true
 
@@ -176,6 +177,7 @@ app.controller('MainWindow', function($scope, $interval) {
   $scope.openMagnetUri = async () => {
 
     let port = await getPort()
+    console.log(port)
     let downloader = new Downloader(port, null, $scope.dht, true)
     downloader.enableDHT = true
 

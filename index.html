@@ -24,11 +24,15 @@
     }
 
     .started {
-      background: -webkit-linear-gradient(#8DC26F, #76b852)
+      background: -webkit-linear-gradient(#8DC26F, #76b852);
     }
 
     .stopped {
-      background: -webkit-linear-gradient(#EA384D, #D31027)
+      background: -webkit-linear-gradient(#EA384D, #D31027);
+    }
+
+    .seeding {
+      background: -webkit-linear-gradient(#F7971E, #FFD200);
     }
 
     li { 
@@ -75,7 +79,7 @@
               </p>
 
               <div class="progress list-elems" style="margin-bottom: 10px;" ng-hide="isHidden(torrent)">
-                <div class="progress-bar"  role="progressbar" ng-class="{started:(torrent.state == 1), stopped:(torrent.state == 4)}" aria-valuenow="{{calcProgress(torrent)}}" style="width: {{calcProgress(torrent)}}%" aria-valuemin="0" aria-valuemax="100"></div>
+                <div class="progress-bar"  role="progressbar" ng-class="{started:(torrent.state == 1), stopped:(torrent.state == 4), seeding:(torrent.state == 0)}" aria-valuenow="{{calcProgress(torrent)}}" style="width: {{calcProgress(torrent)}}%" aria-valuemin="0" aria-valuemax="100"></div>
               </div>
               <p class="list-elems" style="margin-bottom: 0px">
                 {{torrent.getStatus}}
@@ -86,7 +90,7 @@
                 <button class="btn btn-sm" ng-hide="(torrent.state != 4)" ng-click="start(torrent)">
                   <span class="glyphicon glyphicon-play" ></span>
                 </button>
-                <button class="btn btn-sm"  ng-hide="(torrent.state != 1 || torrent.state == 0)" ng-click="stop(torrent)" >
+                <button class="btn btn-sm"  ng-hide="(torrent.state != 1 && torrent.state != 0)" ng-click="stop(torrent)" >
                   <span class="glyphicon glyphicon-pause" ></span>
                 </button>
                 <button class="btn btn-sm" ng-click="delete(torrent, $index)">

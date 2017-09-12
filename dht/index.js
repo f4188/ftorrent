@@ -1049,6 +1049,7 @@ class Node {
 		let transactID = crypto.randomBytes(2)
 		let request = {'t': transactID, 'y':'q', 'q': 'announce_peer', 'a' : {'id': Buffer.from(this.myNodeID,'hex'), 'implied_port': 1,
 		'info_hash': infoHash, 'port': port, 'token': this.token}}
+		let response
 
 		try {
 			
@@ -1091,7 +1092,12 @@ class Node {
 					response = benDecode(msg)
 
 				} catch (error) {
-					return
+
+					if(LOG)
+						console.log(error)
+
+					return //reject(error)
+
 				}
 
  				if(response.t && response.t.equals(request.t)) { //buffers
