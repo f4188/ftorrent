@@ -44,7 +44,7 @@ class Client {
 
 	constructor(dht) {
 
-		this.port = 6000
+		this.port = 7002
 		this.dht = dht
 		this.torrents = []
 		
@@ -54,13 +54,14 @@ class Client {
 
 		term.clear()
 		term.down(1).right(1).bold('Reading torrent file...')
-
-		this.args = []
-		let downloader = new Downloader(++this.port, null, this.dht) //need listen port
-		if(this.dht)
-			downloader.enableDHT = true
+		let downloader
 
 		try {
+
+			this.args = []
+			downloader = new Downloader(++this.port, null, this.dht) //need listen port
+			if(this.dht)
+				downloader.enableDHT = true
 
 			if(this.file)		
 				await downloader.setMetaInfoFile(this.file)
@@ -68,7 +69,7 @@ class Client {
 				downloader.setMagnetUri(this.magnetURI)
 
 		} catch (error) {
-
+			console.log(error)
 			this.screenFunc = this.displayTorrents
 			return
 		}
@@ -249,8 +250,8 @@ class Client {
 
 		}
 
-		term.fullscreen(false)
-		term.processExit()
+		//term.fullscreen(false)
+		//term.processExit()
 
 	}
 
@@ -273,7 +274,12 @@ class Client {
 			
 				let title = "Select to view status"
 				let escMsg = "Any key for actions"
-				term.clear().down(1).right(1).bold(title).move(term.width - escMsg.length - title.length - 2, 0).bold(escMsg).singleColumnMenu( items, { y : 4, exitOnUnexpectedKey : true}, async function( error , response ) {
+
+
+				term.clear().blue(repeat("=", term.width)).nextLine(1).right(1).bold(title).move(term.width - escMsg.length - title.length - 2, 0).bold(escMsg).nextLine(1)
+				term.blue(repeat("=", term.width)).nextLine(1)
+
+				term.singleColumnMenu( items, { y : 4, exitOnUnexpectedKey : true}, async function( error , response ) {
 					
 					progs.forEach( (pairs) => pairs[0].stop())
 					clearTimeout(timeout)
@@ -328,7 +334,15 @@ class Client {
 			//term.once('resize', ()=> {resolve(null)})
 
 			let items = ['Paste magnetUri', 'Select file']
-			term.clear().down(1).right(1).bold("Add torrent").singleColumnMenu( items, { y : 4, exitOnUnexpectedKey : true}, async function( error , response ) {
+
+			var repeat = (char, num) => { let str = ""; while(num --> 0) str += char; return str}
+
+			term.clear().blue(repeat("=", term.width)).nextLine(1)
+
+			term.right(1).bold("Add torrent").nextLine(1)
+			term.blue(repeat("=", term.width)).nextLine(1)
+
+			term.singleColumnMenu( items, { y : 4, exitOnUnexpectedKey : true}, async function( error , response ) {
 				
 				if(error) {
 					reject(error)
@@ -347,6 +361,7 @@ class Client {
 				resolve(null)
 
 			})
+
 		})
 	}
 

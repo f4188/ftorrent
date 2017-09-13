@@ -43,7 +43,7 @@ const MIN_UP_RATE = 1 * 1e3
 
 const NUM_REQUESTS_PER_PEER = 1 // 2
 const NUM_REQUESTS_TOTAL = 200 //
-const NUM_ACTIVE_PIECES = 50
+const NUM_ACTIVE_PIECES = 500
 const MAX_NUM_OPT_UNCHOKE = 4
 const MAX_NUM_MUTUAL_UNCHOKE = 12
 const OPT_LOOP_INTERVAL = 30 * 1e3
@@ -1039,7 +1039,7 @@ Downloader.prototype.seedLoop = function() {
 		let swarm = this.swarm
 		let peerMap = this.swarm.peerStats
 
-		swarm.leechers.intersection(swarm.amUnInterestedPeers).intersection(swarm.unchokedPeers).forEach( peer => peer.choke() )
+		swarm.leechers.intersection(swarm.amUnInterestedPeers).intersection(swarm.unchokedPeers).forEach( peer => peer.choke() ) //uninterested peers who are unchoked
 
 		let interestedPeers = swarm.leechers.intersection(swarm.amInterestedPeers)
 

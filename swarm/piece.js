@@ -4,6 +4,7 @@
  * A piece object with read and verify methods
  * An active piece object with isComplete, assemble, write methods
 */
+
 const crypto = require('crypto')
 const fs = require('graceful-fs')
 
@@ -59,7 +60,7 @@ var Pieces = (file) => class Piece {
 
 	} 
 
-	async doPiecelet(begin, length, doFunc, buf) { //reads arbitrary *valid piecelet
+	async doPiecelet(begin, length, doFunc, buf) { //reads/writes (doFunc) arbitrary piecelet across multiple files
 
 		let start = this.index * this.normalPieceLength + begin, end = start + length
 		let chunks, leftBound = 0, fileBounds = []
@@ -103,7 +104,6 @@ var Pieces = (file) => class Piece {
 
 		} catch (error) {
 
-			console.log(error)
 			return false
 
 		}	
@@ -276,7 +276,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	async assemble() { 
 
-		console.log("assembling", this.index)
 		if(!this.isComplete) return 
 
 		let left = this.left
@@ -304,7 +303,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			return true
 			//return await this.writePiece(buf)
 
-		console.log("write piece fail", this.index)
 		this.requestList.clear()
 		this.dispatchList.clear()
 		this.makeRequests()

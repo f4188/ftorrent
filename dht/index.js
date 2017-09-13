@@ -1135,6 +1135,8 @@ class Node {
 }
 
 module.exports = {
+
 	'DHT' : DHT,
 	'Node' : Node
+	
 }
