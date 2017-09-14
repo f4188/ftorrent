@@ -196,6 +196,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		this.left = 0
 		this.right = this.left + this.pieceLength
 
+		this.reqIter = null
 		this.makeRequests()
 
 	}
@@ -238,14 +239,14 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		let left = start, right = left + piecelet.length
 
 		//this.piecelets.set(left + "," + right, piecelet)
-		this.piecelets.set(left + "," + right, 1)
+		//might fail
 		await this.writePiecelet(left, piecelet.length, piecelet)
-		
-		let request = this.requestList.get(start + "," + (start + piecelet.length))
-		request.dispatched = 2
 
+		this.piecelets.set(left + "," + right, 1)
 		this.dispatchList.delete(start + "," + (start + piecelet.length))
-		
+
+		//should come first 
+		let request = this.requestList.get(start + "," + (start + piecelet.length))
 		clearTimeout(request.timeout)
 		
 	}
@@ -260,6 +261,9 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	get isComplete() {
 
+		if(this.piecelets.size < this.requestList.size)
+			return false
+
 		let left = this.left
 		let newLeft = left
 
@@ -268,7 +272,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 			left = newLeft
 			newLeft = Math.max(left, ...Array.from(this.piecelets.keys()).filter( k => k.split(',')[0] <= left).map( k => k.split(',')[1]) )
 
-		} while( left < this.right  && newLeft > left) 
+		} while( left < this.right && newLeft > left) 
 	
 		return left >= this.right
 
@@ -364,7 +368,11 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	randPieceletReq(peer) {
 
-		let self = this, idx = 0, req
+		let self = this 
+		let req
+		/////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		
+		//if(this.reqIter)
 		//this.arr = this.requestList.values()
 		let arr = Array.from(this.requestList.values()) //too slow
 
@@ -372,23 +380,23 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		//if(this.dispatchList.has(req.begin + "," + (req.begin + req.length))) loop
 		//this.dispatchList.set(req.begin + "," + (req.begin+ req.length), req)
 		//reset arr if no more elems but missing piecelets
-		for( ; idx < arr.length; idx ++ ) {
-			if(arr[idx].dispatched == 0) { //this.dispatchList.has(arr[idex].begin + "," + (arr[idx].begin + arr[idx.length]) )
+
+		for( var idx = 0 ; idx < arr.length; idx ++ ) {
+
+			let reqKey = arr[idx].begin + "," + (arr[idx].begin + arr[idx].length)
+
+			if( !this.dispatchList.has( reqKey ) && !this.piecelets.has( reqKey ) ) {
 				req = arr[idx]
-				req.dispatched = 1
 				this.dispatchList.set(req.begin + "," + (req.begin + req.length), req)
 				break
 			}
+
 		}
 
+		////////////////////////////////////////////////////////////////////////////////////////////////////////
 		if(req) {
 
-			var _putBack = () => {
-				
-				req.dispatched = req.dispatched == 2 ? 2 : 0
-				this.dispatchList.delete(req.begin + "," + (req.begin + req.length))
-
-			}
+			var _putBack = () => this.dispatchList.delete(req.begin + "," + (req.begin + req.length))
 
 			req.timeout = setTimeout( _putBack, 30 * 1e3)
 			req.putBack = _putBack
@@ -401,7 +409,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	requestsLeft() {
 
-		return this.requestList.size - this.dispatchList.size
+		return this.requestList.size - this.dispatchList.size - this.piecelets.size
 
 	}	 
 

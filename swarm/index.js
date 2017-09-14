@@ -43,7 +43,7 @@ const MIN_UP_RATE = 1 * 1e3
 
 const NUM_REQUESTS_PER_PEER = 1 // 2
 const NUM_REQUESTS_TOTAL = 200 //
-const NUM_ACTIVE_PIECES = 500
+const NUM_ACTIVE_PIECES = 50
 const MAX_NUM_OPT_UNCHOKE = 4
 const MAX_NUM_MUTUAL_UNCHOKE = 12
 const OPT_LOOP_INTERVAL = 30 * 1e3
@@ -240,8 +240,8 @@ class Swarm extends EventEmitter {
 	//called periodically and also when new peers available
 	pruneConnections(avail) { //prunes idle or bad peers - peers that never unchoke despite interest - slow peers 
 
-		if(LOG)
-			console.log("Prune connections")
+		//if(LOG)
+		//	console.log("Prune connections")
 
 		let self = this, seeding = this.download.seeding
 
@@ -402,8 +402,8 @@ class Swarm extends EventEmitter {
 
 	addPeers (addrs) {
 
-		if(LOG)
-			console.log("Connecting peers:", addrs)
+		//if(LOG)
+		//	console.log("Connecting peers:", addrs)
 
 		if(!addrs)
 			return
@@ -733,6 +733,10 @@ function Downloader(myPort, peerID, dht, log) { //extends eventEmitter
 		if(!self.activePieces.has(index))
 			return
 		
+		let aPiece = self.activePieces.get(index)
+		//if(LOG)
+		//	console.log('peer_piece', index, aPiece.requestList.size, aPiece.dispatchList.size, aPiece.piecelets.size, self.download.pieces.size, self.fileMetaData.numPieces)
+
 		let pos = peer.requestList.findIndex( req => req.index == index && req.begin == begin && req.length == piecelet.length)
 		
 		if(pos != -1)
@@ -744,10 +748,16 @@ function Downloader(myPort, peerID, dht, log) { //extends eventEmitter
 
 		if(piece.isComplete) {
 
+			//if(LOG)
+			//	console.log('isComplete')
+
 			let success =  await piece.assemble()
 
 			if(success) {
-			
+				
+				//if(LOG)
+				//	console.log('written to disk')
+
 				self.activePieces.delete(index)
 				self.pieces.set(index, new self.Piece(index))
 				self.swarm.havePiece(index)
@@ -1167,59 +1177,52 @@ Downloader.prototype.downloadPieces = function() {
 
 }
 
+Downloader.prototype.randReqToPeer = function(peer) {
+
+	if(!peer)
+		return null
+
+	let pieceletReq, randomIndex, piece
+	let pieces = peer.pieces.intersection(new NSet(this.activePieces.keys()))
+
+	if(pieces.size == 0)
+		return null
+
+	let pieceList = Array.from(pieces)
+
+	do { //randomly select piece, get piecelet or if no piecelet then repeat
+		//console.log('getting piecelet')
+		randomIndex = Math.floor(Math.random() * pieceList.length) //maybe favour pieces that idle peers have ??
+		piece = Array.from(pieces)[randomIndex]
+		pieceletReq = this.activePieces.get(piece).randPieceletReq(peer)
+
+		if(!pieceletReq)
+			pieceList.splice(randomIndex, 1)
+
+	} while (!pieceletReq && pieceList.length > 0) 
+
+	if(pieceletReq) {
+		peer.requestList.push(pieceletReq)
+		peer.request(pieceletReq)
+	}
+
+	return pieceletReq
+
+}
+
 Downloader.prototype.downloadPiecelets = function() { 
 
-	let swarm = this.swarm, /*requests = this.requests, */peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
+	let swarm = this.swarm, peers = swarm.amUnchokedPeers.intersection(swarm.interestedPeers)
 
 	if(peers.size == 0) 
 		return
-
-	let self = this
-
-	var randReqToPeer = ((peer) => {
-
-		if(!peer)
-			return null
-
-		let pieceletReq, randomIndex, piece
-		let pieces = peer.pieces.intersection(new NSet(this.activePieces.keys()))
-
-		if(pieces.size == 0)
-			return null
-
-		let pieceList = Array.from(pieces)
-
-		do { //randomly select piece, get piecelet or if no piecelet then repeat
-			//console.log('getting piecelet')
-			randomIndex = Math.floor(Math.random() * pieceList.length) //maybe favour pieces that idle peers have ??
-			piece = Array.from(pieces)[randomIndex]
-			pieceletReq = this.activePieces.get(piece).randPieceletReq(peer)
-
-			if(!pieceletReq)
-				pieceList.splice(randomIndex, 1)
-
-		} while (!pieceletReq && pieceList.length > 0) 
-
-		if(pieceletReq) {
-			peer.requestList.push(pieceletReq)
-			peer.request(pieceletReq)
-		}
-
-		return pieceletReq
-
-	}).bind(this)
-	
-	//let peersWithOutstandingReq = new NSet(this.requests.map( req => req.peer ) )
-	//let peersWithFourOutstandingReq = peersWithOutstandingReq.filter( peer => this.requests.reduce( (count, req) => req.peer == peer ? (count + 1): count, 0) > 1 )
-	
-//	peers = peers.difference(peersWithFourOutstandingReq)
 
 	while(this.activePieces.getArray().map(piece => piece.requestsLeft()).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
 
 		let rand = Math.random()
 		let randPeer = Array.from(peers)[Math.floor(rand) * peers.size]	
 
-		if( randPeer.requestList.length > NUM_REQUESTS_PER_PEER || !randReqToPeer(randPeer) ) //no more piecelets or more than 4 req
+		if( randPeer.requestList.length > NUM_REQUESTS_PER_PEER || !this.randReqToPeer(randPeer) ) //no more piecelets or more than 4 req
 			peers.delete(randPeer) 
 
 	}
@@ -1228,8 +1231,8 @@ Downloader.prototype.downloadPiecelets = function() {
 
 Downloader.prototype.addPeers = function(peers) {
 
-	if(LOG)
-		console.log("downloader addPeers")
+	//if(LOG)
+	//	console.log("downloader addPeers")
 
 	peers = peers.map( (tuple) => { return { host : tuple.ip, port : tuple.port } } )
 	this.swarm.addPeers(peers)
@@ -1304,6 +1307,8 @@ Downloader.prototype.announce = async function() {
 			let { numLeechers, numSeeders, interval, peerList } = resp
 
 			peerList = peerList || []
+
+			//if peerList.length == 0 then callback(error) eles callback(null, peerList)
 			this.addPeers(peerList)
 			callback()
 
@@ -1319,13 +1324,16 @@ Downloader.prototype.announce = async function() {
 			if(LOG)
 				console.log(error)
 			callback()
+			//callback(error)
 
 		} 
 
 	}).bind(this)
 
 	let self = this
-	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err, callback) {
+
+	//async.tryEach
+	async.each( this.fileMetaData.announceUrlList, _annnounce, function (err) {
 
 		if(LOG && err)
 			console.log(err)

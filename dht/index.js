@@ -25,6 +25,8 @@ var xorCompare = (id) => (n1, n2) => {
 	let c1 = xor(new Buffer(n1, 'hex'), idBuf)
 	let c2 = xor(new Buffer(n2, 'hex'), idBuf)
 
+	//c2 - c1
+	//just use Buffer.compare
 	if( c1 < c2) 
 		return -1
 	else if(c1 > c2) 
@@ -61,14 +63,6 @@ class DHT extends EventEmitter {
 		//                  {   2nd lvl  (s), ________________}  0 to 2^159, 2^159 to 2^160
 		//                                  {____, (s) 3rd lvl}  0 to 2^159  2^159 to 2^159+2^158
 		//                                   mynode
-		/*class NMap {
-			constructor(...args) {
-				this.map = new Map()
-			}
-
-			get(key) { this.map.get(key.toString('hex')) }
-			set(key, value) { this.map.set(key.toString('hex'), value)}
-		}*/
 
 		this.nodes = new Map() //NMap()
 
@@ -85,7 +79,7 @@ class DHT extends EventEmitter {
 			this.sock = sock
 
 		else {
-
+			//ping nodes repeatedly to maintain NAT entry ~ how often?
 			this.sock = dgram.createSocket('udp4')
 			this.sock.bind(port)
 
@@ -169,7 +163,14 @@ class DHT extends EventEmitter {
 					node = bucket.nodeIDs[rand]
 				}
 
-				this.findNodeIter(node).then( x=> { }).catch( err => {if(LOG) console.log("Refresh:", err)} )	 //dump nodes not in DHT
+				this.findNodeIter(node).then( x=> { }).catch( err => {
+
+					if(LOG) 
+						console.log("Refresh:", err)
+					//only keep nodes in dht and nodes close to recently announced infohash
+					//this._inDHT(nodeID) delete this.nodes[nodeID]
+
+				})	 //dump nodes not in DHT
 			}
 
 		})
@@ -859,15 +860,18 @@ class Node {
 		this.host = host
 		this.myNodeID = myNodeID
 		this.sock = sock
+
 		this.default_timeout = 2000
+
 		this.everResp = false // ever
 		this.resp15min = false //15 mins
 		this.query15min = false //15 mins
 		this.lastQueryTime = 0
 		this.lastRespTime = 0
-		this.respTimer
-		this.queryTimer
+		this.respTimer = null
+		this.queryTimer = null
 		this.numNoResp = 0
+
 		this.parseNodeContactInfos = parseNodeContactInfos
 	
 	}
