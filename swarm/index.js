@@ -1217,7 +1217,10 @@ Downloader.prototype.downloadPiecelets = function() {
 	if(peers.size == 0) 
 		return
 
-	while(this.activePieces.getArray().map(piece => piece.requestsLeft()).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
+	while( this.activePieces.getArray().some(piece => piece.requestsLeft() > 0)  && peers.size > 0 && this.activePieces.size > 0 ) {
+
+	//this.activePieces.getArray().some(piece => piece.requestsLeft() > 0)
+	//while(this.activePieces.getArray().map(piece => piece.requestsLeft()).reduce((sum, numReqs) => sum + numReqs, 0) > 0  && peers.size > 0 && this.activePieces.size > 0 ) {
 
 		let rand = Math.random()
 		let randPeer = Array.from(peers)[Math.floor(rand) * peers.size]	

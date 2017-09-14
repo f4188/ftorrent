@@ -24,6 +24,8 @@ const EXTENDED_MSG_TYPE = 20
 
 const EXTENDED_HANDSHAKE_MSG_TYPE = 0
 
+var LOG = true
+
 function Peer(fileMetaData, download, sock, checkID, parser) {
 
 	//opts = { 'readableObjectMode' : true, 'objectMode' : true } //allowHalfOpen ??
@@ -219,7 +221,9 @@ Peer.prototype.aInterested = function() {
 //call on have or bitField message - also when downloader makes new activePiece - and piece downloaded
 Peer.prototype.updateInterested = function() {
 
-	var _interest = () => this.pieces.difference(new NSet(this.download.activePieces.keys())).size > 0
+	var _interest = () => this.pieces.intersection(new NSet(this.download.activePieces.keys())).size > 0
+
+	//var _interest = () => this.pieces.difference(new NSet(this.download.activePieces.keys())).size > 0
 
 	if(_interest() && !this.interested) 
 		this.sendInterested()
