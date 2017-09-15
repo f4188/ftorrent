@@ -620,7 +620,7 @@ function Downloader(myPort, peerID, dht, log) { //extends eventEmitter
 
 	let self = this, file = this.fileMetaData
 
-	//event - 0:none, 1:complete, 2:started, 3:stopped
+	//event = 0:none, 1:complete, 2:started, 3:stopped
 	this.stats = {
 
 		get downloaded() { return self.pieces.has(file.numPieces - 1) ? (file.pieces.size - 1) * file.pieceLength +  file.fileLength % file.pieceLength : file.pieces.size * file.pieceLength },

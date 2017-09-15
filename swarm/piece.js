@@ -240,6 +240,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		//this.piecelets.set(left + "," + right, piecelet)
 		//might fail
+		/*
 		await this.writePiecelet(left, piecelet.length, piecelet)
 
 		this.piecelets.set(left + "," + right, 1)
@@ -248,7 +249,27 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 		//should come first 
 		let request = this.requestList.get(start + "," + (start + piecelet.length))
 		clearTimeout(request.timeout)
+		*/
 		
+
+		let request = this.requestList.get(left + "," + right)
+		clearTimeout(request.timeout)
+
+		try {
+
+			await this.writePiecelet(left, piecelet.length, piecelet)
+			this.piecelets.set(left + "," + right, 1)
+			this.dispatchList.delete(left + "," + right)
+
+
+		} catch (error) {
+	
+			this.dispatchList.delete(left + "," + right)
+
+		}
+
+		
+
 	}
 
 	has(index, start, length) {

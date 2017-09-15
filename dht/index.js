@@ -780,7 +780,7 @@ class Bucket {
 	}
 
 	fits(id) { //nodeID or infoHash
-
+		///////////////////////////////////cast to float - info lost
 		let num = parseInt('0x' + id)
 		return num >= this.min && num < this.max 
 
