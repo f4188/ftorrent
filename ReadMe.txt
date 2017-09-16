@@ -36,19 +36,14 @@ not started
 ****complete, tested, working, features left
 *****complete
 
-issues
+//////////////////////////////////////////////////////////////////////////
 - not exchanging DHT port messages with conn peers
 - not sending periodic peer exchange msg
-- now piece.js writes everything to disk - however not sure if everything written
-- randReq in piece needlessly looping ** high cpu usage
 - announcing on all urls - should respect tiers
-- server not accept req - fixed
 - merge getPeersIter and findNodesIter
-- need to test with larger active piece set 
 - unchokeLoop not working - seedloop working fine
 - need to clear out peerStats
-- ?? close file descripters 
-- clean up piece.js 
+- close file descripters 
 
 fast ex / have all, have none / reject req / sug piece / allowed fast 
 

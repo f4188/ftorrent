@@ -112,7 +112,6 @@ var Pieces = (file) => class Piece {
 
 	async readPiece() {
 
-		//let start = this.index * this.normalPieceLength
 		let begin = 0, length = this.pieceLength 
 		return await this.readPiecelet(begin, length)
 
@@ -121,49 +120,6 @@ var Pieces = (file) => class Piece {
 	async readPiecelet(begin, length) { //reads arbitrary *valid piecelet
 
 		return await this.doPiecelet(begin, length, readStreamFunc)
-
-		/*
-		let start = this.index * this.normalPieceLength + begin, end = start + length
-		let chunks, leftBound = 0, fileBounds = []
-
-		for(var i = 0 ; i <this.fileLengthList.length; i++) {
-
-			let rightBound = leftBound + this.fileLengthList[i]
-
-			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
-				fileBounds.push([i, leftBound, rightBound])
-
-			leftBound = rightBound
-
-		}
-
-		try {
-
-			chunks = await Promise.all( fileBounds.map( async bound => {
-
-				try {
-
-					let len = Math.min( end - start, bound[2] - start )	 -  Math.max( bound[1] - start, 0)
-					let chunkletStart =  Math.max(start - bound[1], 0) 
-					//let len = Math.min( end - start, bound[2] - start ) 
-
-					return await readStreamFunc(chunkletStart, len, this.files[bound[0]])
-
-				} catch (error) {
-
-					return null
-
-				}
-
-			}))
-
-			return Buffer.concat(chunks)
-
-		} catch (error) {
-
-			return null
-
-		}	*/
 
 	}
 
@@ -187,8 +143,11 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		super(index)
 
+		//local to nextPiecelet ///////
 		this.pieceletLength = 2 ** 14
 		this.numPiecelets = Math.ceil(this.pieceLength / this.pieceletLength) 
+		//////////////////////////
+
 		this.piecelets = new Map() 
 		this.requestList = new Map()
 		this.dispatchList = new Map()
@@ -236,21 +195,7 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 	async add(index, start, piecelet) {
 
-		let left = start, right = left + piecelet.length
-
-		//this.piecelets.set(left + "," + right, piecelet)
-		//might fail
-		/*
-		await this.writePiecelet(left, piecelet.length, piecelet)
-
-		this.piecelets.set(left + "," + right, 1)
-		this.dispatchList.delete(start + "," + (start + piecelet.length))
-
-		//should come first 
-		let request = this.requestList.get(start + "," + (start + piecelet.length))
-		clearTimeout(request.timeout)
-		*/
-		
+		let left = start, right = left + piecelet.length		
 
 		let request = this.requestList.get(left + "," + right)
 		clearTimeout(request.timeout)
@@ -268,13 +213,14 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		}
 
-		
-
 	}
 
+	//never used 
 	has(index, start, length) {
 
-		let left = this.index * this.pieceletLength + start
+		//////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+		let left = this.index * this.pieceLength + start
+		//let left = this.index * this.pieceletLength + start
 		let right = left + length
 		return this.piecelets.has(left + "," + right) 
 
@@ -326,12 +272,12 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 
 		if( hash == this.hash)
 			return true
-			//return await this.writePiece(buf)
+		
+		this.dispatchList.clear()
+		this.piecelets.clear()
 
 		this.requestList.clear()
-		this.dispatchList.clear()
 		this.makeRequests()
-		this.piecelets.clear()
 		return false
 
 	}
@@ -339,42 +285,6 @@ var ActivePieces = (file) => class ActivePiece extends Pieces(file) {
 	async writePiecelet(begin, length, buf) {
 
 		return await this.doPiecelet(begin, length, writeStreamFunc, buf)
-
-		/*let start = this.index * this.normalPieceLength
-		let end = start + length
-		let leftBound = 0, fileBounds = []
-
-		for(var i = 0 ; i < this.fileLengthList.length; i++) {
-
-			let rightBound = leftBound + this.fileLengthList[i]
-			if ( leftBound < start && rightBound > start || leftBound < end && rightBound > end )
-				fileBounds.push([i, leftBound, rightBound])
-			leftBound = rightBound
-
-		}
-
-		try {
-
-			await Promise.all( fileBounds.map( async bound => {
-				
-				let leftFileOffset =  Math.max(start - bound[1], 0)
-				let leftPieceOffset = Math.max( bound[1] - start, 0) 
-				let rightFileOffset = Math.min( end, bound[2] )
-				let rightPieceOffset = Math.min( end - start, bound[2] - start )				
- 				let chunklet = buf.slice( leftPieceOffset , rightPieceOffset)				
-
-				return await writeStreamFunc( leftFileOffset, chunklet, this.files[bound[0]])
-
-			}))
-
-		} catch (error) {
-
-			console.log(error)
-			return false
-
-		}
-
-		return true */
 
 	}	
 
